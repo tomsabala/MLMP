@@ -191,15 +191,15 @@
  {
      std::cout << "OMPL version: " << OMPL_VERSION << std::endl;
   
-     boost::filesystem::path path(TEST_RESOURCES_DIR);
-     bool useDeterministicSampling = true;
-     Plane2DEnvironment env((path / "ppm/floor.ppm").string().c_str(), useDeterministicSampling);
+     //boost::filesystem::path path(TEST_RESOURCES_DIR);
+     //bool useDeterministicSampling = true;
+     //Plane2DEnvironment env((path / "ppm/floor.ppm").string().c_str(), useDeterministicSampling);
   
-     if (env.plan(0, 0, 777, 1265))
-     {
-         env.recordSolution();
-         env.save("result_demo.ppm");
-     }
+     //if (env.plan(0, 0, 777, 1265))
+     //{
+     //    env.recordSolution();
+     //    env.save("result_demo.ppm");
+     //}
   
      return 0;
  }
