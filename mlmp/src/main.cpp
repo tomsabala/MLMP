@@ -1,128 +1,97 @@
- /*********************************************************************
-  * Software License Agreement (BSD License)
-  *
-  *  Copyright (c) 2019, University of Stuttgart
-  *  All rights reserved.
-  *
-  *  Redistribution and use in source and binary forms, with or without
-  *  modification, are permitted provided that the following conditions
-  *  are met:
-  *
-  *   * Redistributions of source code must retain the above copyright
-  *     notice, this list of conditions and the following disclaimer.
-  *   * Redistributions in binary form must reproduce the above
-  *     copyright notice, this list of conditions and the following
-  *     disclaimer in the documentation and/or other materials provided
-  *     with the distribution.
-  *   * Neither the name of the University of Stuttgart nor the names
-  *     of its contributors may be used to endorse or promote products
-  *     derived from this software without specific prior written
-  *     permission.
-  *
-  *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-  *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-  *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-  *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-  *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-  *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-  *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-  *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-  *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-  *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-  *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-  *  POSSIBILITY OF SUCH DAMAGE.
-  *********************************************************************/
-  
- /* Author: Andreas Orthey */
-  
- #include <ompl/base/spaces/SE2StateSpace.h>
- #include <ompl/base/spaces/RealVectorStateSpace.h>
- #include <ompl/base/SpaceInformation.h>
- #include <ompl/base/StateSpace.h>
- #include <ompl/multilevel/planners/qrrt/QRRT.h>
- #include <iostream>
- #include <boost/math/constants/constants.hpp>
-  
- using namespace ompl::base;
-  
- // Path Planning on fiber bundle SE2 \rightarrow R2
-  
- bool boxConstraint(const double values[])
- {
-     const double &x = values[0] - 0.5;
-     const double &y = values[1] - 0.5;
-     double pos_cnstr = sqrt(x * x + y * y);
-     return (pos_cnstr > 0.2);
- }
- bool isStateValid_SE2(const State *state)
- {
-     const auto *SE2state = state->as<SE2StateSpace::StateType>();
-     const auto *R2 = SE2state->as<RealVectorStateSpace::StateType>(0);
-     const auto *SO2 = SE2state->as<SO2StateSpace::StateType>(1);
-     return boxConstraint(R2->values) && (SO2->value < boost::math::constants::pi<double>() / 2.0);
- }
- bool isStateValid_R2(const State *state)
- {
-     const auto *R2 = state->as<RealVectorStateSpace::StateType>();
-     return boxConstraint(R2->values);
- }
-  
- int main()
- {
-     // Setup SE2
-     auto SE2(std::make_shared<SE2StateSpace>());
-     RealVectorBounds bounds(2);
-     bounds.setLow(0);
-     bounds.setHigh(1);
-     SE2->setBounds(bounds);
-     SpaceInformationPtr si_SE2(std::make_shared<SpaceInformation>(SE2));
-     si_SE2->setStateValidityChecker(isStateValid_SE2);
-  
-     // Setup Quotient-Space R2
-     auto R2(std::make_shared<RealVectorStateSpace>(2));
-     R2->setBounds(0, 1);
-     SpaceInformationPtr si_R2(std::make_shared<SpaceInformation>(R2));
-     si_R2->setStateValidityChecker(isStateValid_R2);
-  
-     // Create vector of spaceinformationptr
-     std::vector<SpaceInformationPtr> si_vec;
-     si_vec.push_back(si_R2);
-     si_vec.push_back(si_SE2);
-  
-     // Define Planning Problem
-     using SE2State = ScopedState<SE2StateSpace>;
-     SE2State start_SE2(SE2);
-     SE2State goal_SE2(SE2);
-     start_SE2->setXY(0, 0);
-     start_SE2->setYaw(0);
-     goal_SE2->setXY(1, 1);
-     goal_SE2->setYaw(0);
-  
-     ProblemDefinitionPtr pdef = std::make_shared<ProblemDefinition>(si_SE2);
-     pdef->setStartAndGoalStates(start_SE2, goal_SE2);
-  
-     // Setup Planner using vector of spaceinformationptr
-     auto planner = std::make_shared<ompl::multilevel::QRRT>(si_vec);
-  
-     // Planner can be used as any other OMPL algorithm
-     planner->setProblemDefinition(pdef);
-     planner->setup();
-  
-     PlannerStatus solved = planner->Planner::solve(1.0);
-  
-     if (solved)
-     {
-         std::cout << std::string(80, '-') << std::endl;
-         std::cout << "Bundle Space Path (SE2):" << std::endl;
-         std::cout << std::string(80, '-') << std::endl;
-         pdef->getSolutionPath()->print(std::cout);
-  
-         std::cout << std::string(80, '-') << std::endl;
-         std::cout << "Base Space Path (R2)   :" << std::endl;
-         std::cout << std::string(80, '-') << std::endl;
-         const ProblemDefinitionPtr pdefR2 = planner->getProblemDefinition(0);
-         pdefR2->getSolutionPath()->print(std::cout);
-         std::cout << std::string(80, '-') << std::endl;
-     }
-     return 0;
- }
+
+#include <boost/program_options.hpp>
+#include <iostream>
+#include <string>
+#include <boost/math/constants/constants.hpp>
+
+#include <planner/BiQRRT.h> 
+#include <models/scene.h>
+#include <models/solver.h>
+
+#include <ompl/base/spaces/SE3StateSpace.h>
+#include <ompl/base/spaces/SO3StateSpace.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/StateSpace.h>
+#include <ompl/multilevel/planners/qrrt/QRRT.h>
+
+using namespace ompl::base;
+
+using SE3State = ScopedState<SE3StateSpace>;
+using SO3State = ScopedState<SO3StateSpace>;
+using R3State = ScopedState<RealVectorStateSpace>;
+const double pi = boost::math::constants::pi<double>();
+
+namespace po = boost::program_options;
+
+void parse_arguments(int ac, char* av[], std::string& abstractionLevel,
+                                         std::string& inputFile) {
+    // Define the options
+    po::options_description desc("Allowed options");
+    desc.add_options()
+        ("help", "")
+        ("abstraction", po::value<std::string>(&abstractionLevel)->required(), "set abstraction level")
+        ("input-file", po::value<std::string>(&inputFile), "input file");
+
+    po::variables_map vm;
+    try {
+        po::store(po::parse_command_line(ac, av, desc), vm);
+        
+        // Handle the help option
+        if (vm.count("help")) {
+            std::cout << desc << "\n";
+            std::exit(1);
+        }
+
+        po::notify(vm);
+    } catch (const po::error& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        std::cerr << desc << "\n";
+        std::exit(1);
+    }
+}
+
+
+int main(int argc, char* argv[])
+{
+    //############################################################################
+    // Step 1: Setup planning problem using several quotient-spaces
+    //############################################################################
+    // Setup scene
+    std::string abstractionLevel = "";
+    std::string inputFile = "";
+
+    parse_arguments(argc, argv, abstractionLevel, inputFile);
+    
+    if (abstractionLevel.empty() || inputFile.empty()) {
+        std::cerr << "Error: Required arguments are missing.\n";
+        std::exit(1);
+    }
+
+    mlmp::Scene scene;
+    scene.loadScene(inputFile, true);
+    const auto abstraction = mlmp::abstraction::fromValue(abstractionLevel); 
+     
+    // mlmp::Solver solver(scene, abstraction);
+    // solver.setup();
+    // const auto& result = solver.solve();
+    // if (!result) {
+    //     std::cout<<"FAILED"<<std::endl;
+    // }
+
+
+    std::cout << "-----DEBUG-----" << std::endl;
+    auto rvSpace(std::make_shared<RealVectorStateSpace>(3));
+    rvSpace->setBounds(0, 360);
+    rvSpace->setLongestValidSegmentFraction(0.01);
+    SpaceInformationPtr siPtr(std::make_shared<SpaceInformation>(rvSpace));
+    siPtr->setStateValidityChecker([&](const State *state) -> bool {
+        return scene.isStateValid(state, 1, 3);  
+    });
+    ompl::base::ScopedState<> state(rvSpace);
+    state[0] = 30;
+    state[1] = 0;
+    state[2] = 0;
+
+    scene.isStateValid(state.get(), 1, 3);
+}
