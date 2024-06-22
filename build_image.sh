@@ -1,4 +1,4 @@
 #!/bin/bash
 
-sudo docker build -t ompl .
+sudo docker build --no-cache -t ompl .
 

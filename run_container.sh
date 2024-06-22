@@ -1,4 +1,4 @@
 #!/bin/bash
 
-docker run --name mlmp-compile --volume /home/toms/workspace/robotics/MLMP:/home/MLMP  -it -d  ompl:latest
+docker run --rm --name mlmp-compile --volume /home/toms/workspace/robotics/MLMP:/home/mlmp  -it -d  ompl:latest
 

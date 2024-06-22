@@ -3,6 +3,16 @@ project(mlmp)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src)
 
+# Set the rounding math flag for GCC or Clang
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frounding-math")
+endif()
+
+# Set the rounding math flag for Intel compiler
+if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fp-model strict")
+endif()
+
 find_package(CGAL REQUIRED COMPONENTS Core)
 # find_package(nlohmann_json REQUIRED)
 find_package(ompl REQUIRED)
