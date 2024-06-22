@@ -14,7 +14,7 @@ namespace mlmp
         AbstractionType fromValue(std::string str) {
             static std::unordered_map<std::string, AbstractionType> const table = { 
                 {"PROJECTION", AbstractionType::Projection}, 
-                {"PRIORITY_ORDER", AbstractionType::PriorityOrder}
+                {"PRIORITY-ORDER", AbstractionType::PriorityOrder}
             };
 
             auto it = table.find(str);
