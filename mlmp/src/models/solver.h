@@ -4,7 +4,7 @@
 #include <abstraction_type.h>
 #include <scene.h>
 #include <state/kinematic_chain.h>
-#include "common/segment.h"
+#include "common/geometry.h"
 
 
 #include <ompl/base/spaces/SE3StateSpace.h>

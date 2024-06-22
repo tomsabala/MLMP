@@ -5,7 +5,7 @@
 
 #include <planar_robot_arm.h>
 #include <abstraction_type.h>
-#include <common/segment.h>
+#include <common/geometry.h>
 
 #include <nlohmann/json.hpp>
 

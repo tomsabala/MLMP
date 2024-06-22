@@ -1,5 +1,5 @@
-#ifndef SEGMENT_H
-#define SEGMENT_H
+#ifndef GEOMETRY_H
+#define GEOMETRY_H
 
 
 namespace mlmp {

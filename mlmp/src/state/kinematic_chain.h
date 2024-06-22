@@ -1,7 +1,7 @@
 #ifndef OMPL_DEMO_KINEMATIC_CHAIN_
 #define OMPL_DEMO_KINEMATIC_CHAIN_
 
-#include "common/segment.h"
+#include "common/geometry.h"
 
 
 #include <ompl/base/spaces/RealVectorStateSpace.h>
