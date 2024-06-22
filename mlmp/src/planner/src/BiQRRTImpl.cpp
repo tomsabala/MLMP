@@ -22,6 +22,8 @@ ompl::multilevel::BiQRRTImpl::~BiQRRTImpl(){}
 
 void BiQRRTImpl::setup()
 {
+
+    OMPL_INFORM("setup start");
     BaseT::setup();
 
     maxDistance_ = 0.1;
@@ -38,19 +40,27 @@ void BiQRRTImpl::setup()
         treeGoal_->setDistanceFunction(
             [this](const Configuration *a, const Configuration *b) { return distance(a, b); });
     }
+
+    OMPL_INFORM("setup end");
 }
 void BiQRRTImpl::clear()
 {
+
+    OMPL_INFORM("clear start");
     BaseT::clear();
     if (treeStart_)
         treeStart_->clear();
     if (treeGoal_)
         treeGoal_->clear();
     distanceBetweenTrees_ = std::numeric_limits<double>::infinity();
+
+    OMPL_INFORM("clear end");
 }
 
 void BiQRRTImpl::init()
 {
+
+    OMPL_INFORM("init start");
     if (const base::State *state = pis_.nextStart())
     {
         qStart_ = new Configuration(getBundle(), state);
@@ -83,10 +93,14 @@ void BiQRRTImpl::init()
         OMPL_ERROR("%s: There are no valid goal states!", getName().c_str());
         throw ompl::Exception("Invalid goal states.");
     }
+
+    OMPL_INFORM("init end");
 }
 
 void BiQRRTImpl::grow()
 {
+
+    OMPL_INFORM("grow start");
     //(0) If first run, add start configuration
     if (firstRun_)
     {
@@ -151,6 +165,7 @@ void BiQRRTImpl::grow()
             hasSolution_ = true;
         }
     }
+    OMPL_INFORM("grow end");
 }
 
 void BiQRRTImpl::getPlannerData(ompl::base::PlannerData &data) const

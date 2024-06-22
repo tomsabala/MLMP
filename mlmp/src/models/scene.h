@@ -7,10 +7,13 @@
 #include <abstraction_type.h>
 
 #include <nlohmann/json.hpp>
+
 #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
 #include <CGAL/Constrained_Delaunay_triangulation_2.h>
 #include <CGAL/Constrained_triangulation_plus_2.h>
 #include <CGAL/Triangulation_face_base_with_info_2.h>
+#include <CGAL/intersections.h>
+
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/geometric/SimpleSetup.h>
@@ -76,11 +79,11 @@ namespace mlmp {
             n=value;
         }
 
-        std::vector<Segment> computeSegments(const std::vector<double> &jointAngles, const Point pinnedPosition, const double jointLength) {
+        std::vector<Segment> computeSegments(const std::vector<double> &jointAngles, const Point pinnedPosition, const double jointLength) const {
             if (verbose) {
                 std::cout<<"------On scene::compute-segments------\nGot {";
                 for (const auto& i: jointAngles)
-                    std::cout << i << ' ';
+                    std::cout << (180*i)/M_PI << ' ';
                 std::cout<<"}, with "<<pinnedPosition<<std::endl;
             }
             
@@ -89,9 +92,9 @@ namespace mlmp {
             double currentAngle = 0.0;
 
             for (size_t i = 0; i < jointAngles.size(); ++i) {
-                currentAngle += jointAngles[i];
-                Point currentEnd(currentStart.x() + jointLength * cos((M_PI*currentAngle)/180),
-                                currentStart.y() + jointLength * sin((M_PI*currentAngle)/180));
+                currentAngle = jointAngles[i];
+                Point currentEnd(currentStart.x() + jointLength * cos(currentAngle),
+                                currentStart.y() + jointLength * sin(currentAngle));
                 segments.emplace_back(Segment(currentStart, currentEnd));
                 currentStart = currentEnd;
             }
@@ -131,7 +134,7 @@ namespace mlmp {
         }
 
         // Function to check if a segment is valid by walking along it and checking face validity
-        bool isArmValid(const std::vector<Segment> &arm) {
+        bool isArmValid(const std::vector<Segment> &arm) const {
             if (verbose) {
                 std::cout<<"------On scene::is-arm-valid------"<<std::endl;
             }
@@ -202,6 +205,9 @@ namespace mlmp {
         public:
     
         void loadScene(const std::string& filename, bool debug) {
+            if (verbose) {
+                std::cout<<"------On scene::load-scene------"<<std::endl;
+            }
             verbose=debug;
             std::ifstream file(filename);
             if (!file.is_open()) {
@@ -227,10 +233,22 @@ namespace mlmp {
                 std::vector<double> _sa;
                 std::vector<double> _ga;
                 for (const auto& angle : robot["startAngles"]) {
-                    _sa.emplace_back(angle);
+                    _sa.emplace_back((M_PI*angle.get<int>())/180);
                 }
                 for (const auto& angle : robot["goalAngles"]) {
-                    _ga.emplace_back(angle);
+                    _ga.emplace_back((M_PI*angle.get<int>())/180);
+                }
+                if (verbose) {
+                    std::cout<<"** (In inner loop) start angles: ";
+                    for (const auto& a : _sa) {
+                        std::cout<<a <<" ";
+                    }
+                    std::cout<<std::endl;
+                    std::cout<<"** (In inner loop) goal angles: ";
+                    for (const auto& a : _ga) {
+                        std::cout<<a <<" ";
+                    }
+                    std::cout<<std::endl;
                 }
                 startAngles.emplace_back(_sa);
                 goalAngles.emplace_back(_ga);
@@ -269,33 +287,75 @@ namespace mlmp {
             setN(json["metadata"]["n"].get<int>());
         }
 
-        bool isStateValid(const ob::State *state, const int& r, const int& j) {
+        bool isStateValid(const ob::State *state, const int& r, const int& j) const {
             // Compute the robot arm segments based on the given joint angles
             const auto *_angles = state->as<ob::RealVectorStateSpace::StateType>();
             std::vector<std::vector<Segment>> robotArms(r);
+            if (verbose) {
+                std::cout<<"------On scene::is-state-valid------"<<std::endl;
+                std::cout<<"robots "<<r<<" | joints "<<j<<std::endl;
+            }
             for (unsigned int i = 0; i < r; ++i) {
                 std::vector<double> values(j);
                 for (unsigned int k = 0; k < j; ++k) {
-                    values[k] = _angles->values[i*r + k];
+                    values[k] = _angles->values[i*j + k];
                 }
                 robotArms[i] = computeSegments(values, Point(robots[i].cx, robots[i].cy), robots[i].jointLength);
             }
             
-
-            // Check each segment for validity
-            for (const auto &arm : robotArms) {
-                if (!isArmValid(arm)) {
-                    return false; // Collision detected
-                }
+            for (const auto &arm : robotArms) 
+                if (!isArmValid(arm)) 
+                    return false;    
+            
+            if (verbose) {
+                std::cout<<"check for self intersections"<<std::endl;
             }
 
-            return true; // No collisions
+            for (auto i = 0; i < r; ++i) 
+                for (auto j1 = 0; j1 < j; ++j1) 
+                    for (auto j2 = j1 + 1; j2 < j; ++j2) {
+                        if (j2 == j1 + 1) {
+                            if (std::abs(M_PI - std::abs(_angles->values[i*j + j1] - _angles->values[i*j+j2])) <= 0.001) {
+                                if (verbose) 
+                                    std::cout<<"** (In inner loop) found intesection for robot "<<i<<" joints "<< j1<< " "<< j2 <<std::endl;
+                                return false;
+                            }
+                        } else {
+                            const auto result = intersection(robotArms[i][j1], robotArms[i][j2]);
+                            if (result) {
+                                if (verbose) 
+                                    std::cout<<"** (In inner loop) found intesection for robot "<<i<<" joints "<< j1<< " "<< j2 <<std::endl;
+                                return false; 
+                            }
+                        }
+                    }
+                        
 
+                             
+            if (verbose) {
+                std::cout<<"check for dual intersections"<<std::endl;
+            }
+
+            for (auto r1 = 0; r1 < r; ++r1) 
+                for (auto r2 = r1 + 1; r2 < r; ++r2)
+                    for (auto j1 = 0; j1 < j; ++j1) 
+                        for (auto j2 = 0; j2 < j; ++j2) {
+                            const auto result = intersection(robotArms[r1][j1], robotArms[r2][j2]);
+                            if (result) {
+                                if (verbose) 
+                                    std::cout<<"** (In inner loop) found intesection for robot "<<r1<<" "<< r2 <<" joints "<< j1<< " "<< j2 <<std::endl;
+                                return false;
+                            }
+                        }
+            if (verbose) {
+                std::cout<<"------END scene::is-state-valid------"<<std::endl;
+            }
+            return true; 
         }
 
-        int getN() { return n;}
+        int getN() const { return n;}
 
-        int getR() {return robots.size();}    
+        int getR() const {return robots.size();}    
 
         std::vector<Robot> getRobots() {return robots;}
 
