@@ -56,14 +56,13 @@ namespace mlmp {
     
     class Solver {
         Scene scene;
-        AbstractionType abstractionLevel;
         ProblemDefinitionPtr pdef;
         std::vector<SpaceInformationPtr> siVec;
         bool verbose;
 
         public:
 
-        Solver(Scene scene, const AbstractionType& abstractionType, bool debug) : scene(scene), abstractionLevel(abstractionType), verbose(debug) {}
+        Solver(Scene scene, bool debug) : scene(scene), verbose(debug) {}
 
         void solve(double& timeLimit) {
             if (verbose) {
@@ -122,7 +121,8 @@ namespace mlmp {
                 const ompl::base::ProblemDefinitionPtr pdef = planner->getProblemDefinition();
                 std::cout << std::string(80, '-') << std::endl;
                 pdef->getSolutionPath()->print(std::cout);
-                std::cout << std::string(80, '-') << std::endl;            }
+                std::cout << std::string(80, '-') << std::endl;           
+            }
             else
             {
                 OMPL_ERROR("Failed finding solution after %f seconds.", timeToCompute);

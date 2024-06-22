@@ -24,8 +24,7 @@ const double pi = boost::math::constants::pi<double>();
 
 namespace po = boost::program_options;
 
-void parse_arguments(int ac, char* av[], std::string& abstractionLevel,
-                                         std::string& inputFile,
+void parse_arguments(int ac, char* av[], std::string& inputFile,
                                          bool& verbose,
                                          double& timeLimit,
                                          bool& internalV) {
@@ -33,7 +32,6 @@ void parse_arguments(int ac, char* av[], std::string& abstractionLevel,
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "")
-        ("abstraction", po::value<std::string>(&abstractionLevel)->required(), "set abstraction level")
         ("input-file", po::value<std::string>(&inputFile)->required(), "input file")
         ("time-limit", po::value<double>(&timeLimit)->default_value(1.0), "run time limit")
         ("v", po::value<bool>(&verbose)->default_value(false), "verbose")
@@ -64,15 +62,14 @@ int main(int argc, char* argv[])
     // Step 1: Setup planning problem using several quotient-spaces
     //############################################################################
     // Setup scene
-    std::string abstractionLevel = "";
     std::string inputFile = "";
     bool verbose;
     bool internalV;
     double timeLimit;
 
-    parse_arguments(argc, argv, abstractionLevel, inputFile, verbose, timeLimit, internalV);
+    parse_arguments(argc, argv, inputFile, verbose, timeLimit, internalV);
     
-    if (abstractionLevel.empty() || inputFile.empty()) {
+    if (inputFile.empty()) {
         std::cerr << "Error: Required arguments are missing.\n";
         std::exit(1);
     }
@@ -83,8 +80,7 @@ int main(int argc, char* argv[])
 
     mlmp::Scene scene;
     scene.loadScene(inputFile, internalV);
-    const auto abstraction = mlmp::abstraction::fromValue(abstractionLevel); 
      
-    mlmp::Solver solver(scene, abstraction, verbose);
+    mlmp::Solver solver(scene, verbose);
     solver.solve(timeLimit);
 }
