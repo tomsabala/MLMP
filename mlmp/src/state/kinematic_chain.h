@@ -47,10 +47,10 @@ protected:
 class KinematicChainSpace : public ompl::base::RealVectorStateSpace
 {
 public:
-    KinematicChainSpace(unsigned int numLinks, double linkLength, Environment *env = nullptr)
-      : ompl::base::RealVectorStateSpace(numLinks), linkLength_(linkLength), environment_(env)
+    KinematicChainSpace(unsigned int numRobots, unsigned int numLinks, double linkLength, Environment *env = nullptr)
+      : ompl::base::RealVectorStateSpace(numRobots*numLinks), numRobots_(numRobots), numLinks_(numLinks), linkLength_(linkLength), environment_(env)
     {
-        ompl::base::RealVectorBounds bounds(numLinks);
+        ompl::base::RealVectorBounds bounds(numRobots*numLinks);
         bounds.setLow(-boost::math::constants::pi<double>());
         bounds.setHigh(boost::math::constants::pi<double>());
         setBounds(bounds);
@@ -146,13 +146,16 @@ public:
 
 protected:
     double linkLength_;
+    int numRobots_;
+    int numLinks_;
     Environment *environment_;
 };
 
 class KinematicChainValidityChecker : public ompl::base::StateValidityChecker
 {
 public:
-    KinematicChainValidityChecker(const ompl::base::SpaceInformationPtr &si) : ompl::base::StateValidityChecker(si)
+    KinematicChainValidityChecker(const ompl::base::SpaceInformationPtr &si, std::vector<mlmp::common::Point> pinnedPositions, unsigned int numRobots, unsigned int numLinks) 
+    : ompl::base::StateValidityChecker(si), pinnedPositions_(pinnedPositions), numRobots_(numRobots), numLinks_(numLinks)
     {
     }
 
@@ -168,28 +171,44 @@ protected:
     bool isValidImpl(const KinematicChainSpace *space, const KinematicChainSpace::StateType *s) const
     {
         unsigned int n = si_->getStateDimension();
-        Environment segments;
+        std::vector<Environment> segmentsEnvs;
         double linkLength = space->linkLength();
-        double theta = 0., x = 0., y = 0., xN, yN;
-        std::cout<<"dimension "<<n<<" link length "<<linkLength<<std::endl;
-        segments.reserve(n);
-        for (unsigned int i = 0; i < n; ++i)
-        {
-            theta += s->values[i];
-            std::cout<<"theta "<<theta<<std::endl;
-            xN = x + cos(theta) * linkLength;
-            yN = y + sin(theta) * linkLength;
-            segments.emplace_back(x, y, xN, yN);
-            x = xN;
-            y = yN;
+        segmentsEnvs.reserve(numRobots_);
+        for (unsigned int i = 0; i < numRobots_; ++i) {
+            Environment env;
+            double theta = 0., x = pinnedPositions_[i].x, y = pinnedPositions_[i].y, xN, yN;
+            for (unsigned int j = 0; j < numLinks_; ++j) {
+                theta += s->values[j*numRobots_ + i];
+                xN = x + cos(theta) * linkLength;
+                yN = y + sin(theta) * linkLength;
+                env.emplace_back(x, y, xN, yN);
+                x = xN;
+                y = yN;
+            }
+            segmentsEnvs.emplace_back(env);
         }
-        // xN = x + cos(theta) * 0.001;
-        // yN = y + sin(theta) * 0.001;
-        // segments.emplace_back(x, y, xN, yN);
-        bool _selfIntersectionTest = selfIntersectionTest(segments);
-        bool _envIntersectionTest = environmentIntersectionTest(segments, *space->environment());
-        std::cout<<"self: "<<_selfIntersectionTest<<" env: "<<_envIntersectionTest<<std::endl;
-        return _selfIntersectionTest && _envIntersectionTest;
+        
+        for (auto& env : segmentsEnvs) {
+            if (!selfIntersectionTest(env)){
+                return false;
+            }
+        }
+
+        for (unsigned int i = 0; i < numRobots_; ++i) {
+            for (unsigned int j = i + 1; j < numRobots_; ++j) {
+                if (!environmentIntersectionTest(segmentsEnvs[i], segmentsEnvs[j])) {
+                    return false;
+                }
+            }
+        }
+
+        Environment allRobots;
+        for(auto && env : segmentsEnvs){
+           allRobots.insert(allRobots.end(), env.begin(), env.end());
+        }
+
+        bool _envIntersectionTest = environmentIntersectionTest(allRobots, *space->environment());
+        return _envIntersectionTest;
     }
 
     // return true iff env does *not* include a pair of intersecting segments
@@ -206,14 +225,9 @@ protected:
     {
         for (const auto &i : env0)
             for (const auto &j : env1)
-                if (intersectionTest(i, j)) {
-                    auto segI = i;
-                    auto segJ = j;
-                    std::cout <<"found intersection"<<std::endl;
-                    std::cout <<segI.x0 << " " << segI.y0 << " -> " << segI.x1 << " "<< segI.y1<<std::endl;
-                    std::cout <<segJ.x0 << " " << segJ.y0 << " -> " << segJ.x1 << " "<< segJ.y1<<std::endl;
+                if (intersectionTest(i, j)) 
                     return false;
-                }
+                
                     
         return true;
     }
@@ -244,6 +258,10 @@ protected:
             return false;  // No collision
         return true;
     }
+
+    int numRobots_;
+    int numLinks_;
+    std::vector<mlmp::common::Point> pinnedPositions_;
 };
 
 #endif

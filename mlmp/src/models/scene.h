@@ -365,6 +365,14 @@ namespace mlmp {
 
         std::vector<Robot> getRobots() {return robots;}
 
+        std::vector<common::Point> getPinnedPositions() {
+            std::vector<common::Point> points;
+            for (auto r : robots) {
+                points.emplace_back(common::Point(r.cx, r.cy));
+            }
+            return points;
+        }
+
         std::vector<std::vector<double>> getStartAngles() { return startAngles; }
         std::vector<std::vector<double>> getGoalAngles() { return goalAngles; }
         double getStartAngleAt(int r, int j) { return startAngles[r][j]; }
