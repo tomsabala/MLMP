@@ -41,6 +41,8 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/src/planner
     ${CMAKE_SOURCE_DIR}/src/planner/src
     ${CMAKE_SOURCE_DIR}/src/models
+    ${CMAKE_SOURCE_DIR}/src/state
+    ${CMAKE_SOURCE_DIR}/src/common
 )
 
 add_executable(
