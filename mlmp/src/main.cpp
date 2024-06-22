@@ -25,13 +25,19 @@ const double pi = boost::math::constants::pi<double>();
 namespace po = boost::program_options;
 
 void parse_arguments(int ac, char* av[], std::string& abstractionLevel,
-                                         std::string& inputFile) {
+                                         std::string& inputFile,
+                                         bool& verbose,
+                                         double& timeLimit,
+                                         bool& internalV) {
     // Define the options
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "")
         ("abstraction", po::value<std::string>(&abstractionLevel)->required(), "set abstraction level")
-        ("input-file", po::value<std::string>(&inputFile), "input file");
+        ("input-file", po::value<std::string>(&inputFile)->required(), "input file")
+        ("time-limit", po::value<double>(&timeLimit)->default_value(1.0), "run time limit")
+        ("v", po::value<bool>(&verbose)->default_value(false), "verbose")
+        ("iv", po::value<bool>(&internalV)->default_value(false), "internal verbose");
 
     po::variables_map vm;
     try {
@@ -60,38 +66,25 @@ int main(int argc, char* argv[])
     // Setup scene
     std::string abstractionLevel = "";
     std::string inputFile = "";
+    bool verbose;
+    bool internalV;
+    double timeLimit;
 
-    parse_arguments(argc, argv, abstractionLevel, inputFile);
+    parse_arguments(argc, argv, abstractionLevel, inputFile, verbose, timeLimit, internalV);
     
     if (abstractionLevel.empty() || inputFile.empty()) {
         std::cerr << "Error: Required arguments are missing.\n";
         std::exit(1);
     }
+    
+    if(!verbose) {
+        ompl::msg::setLogLevel(ompl::msg::LOG_NONE);
+    }
 
     mlmp::Scene scene;
-    scene.loadScene(inputFile, true);
+    scene.loadScene(inputFile, internalV);
     const auto abstraction = mlmp::abstraction::fromValue(abstractionLevel); 
      
-    // mlmp::Solver solver(scene, abstraction);
-    // solver.setup();
-    // const auto& result = solver.solve();
-    // if (!result) {
-    //     std::cout<<"FAILED"<<std::endl;
-    // }
-
-
-    std::cout << "-----DEBUG-----" << std::endl;
-    auto rvSpace(std::make_shared<RealVectorStateSpace>(3));
-    rvSpace->setBounds(0, 360);
-    rvSpace->setLongestValidSegmentFraction(0.01);
-    SpaceInformationPtr siPtr(std::make_shared<SpaceInformation>(rvSpace));
-    siPtr->setStateValidityChecker([&](const State *state) -> bool {
-        return scene.isStateValid(state, 1, 3);  
-    });
-    ompl::base::ScopedState<> state(rvSpace);
-    state[0] = 30;
-    state[1] = 0;
-    state[2] = 0;
-
-    scene.isStateValid(state.get(), 1, 3);
+    mlmp::Solver solver(scene, abstraction, verbose);
+    solver.solve(timeLimit);
 }
