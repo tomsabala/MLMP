@@ -1,7 +1,6 @@
 #include <math.h>
 #include <boost/range/algorithm_ext/push_back.hpp>
 
-#include <abstraction_type.h>
 #include <scene.h>
 #include <state/kinematic_chain.h>
 #include "common/geometry.h"
@@ -13,13 +12,91 @@
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/StateSpace.h>
 #include <ompl/multilevel/planners/qrrt/QRRT.h>
+#include <ompl/multilevel/planners/qmp/QMP.h>
+#include <ompl/multilevel/planners/qrrt/QRRTStar.h>
+#include <ompl/multilevel/planners/qmp/QMPStar.h>
 
-typedef mlmp::abstraction::AbstractionType AbstractionType;
 using namespace ompl::base;
 std::vector<Environment> envs;
 
 namespace mlmp {
-    PlannerPtr GetPlanner(std::vector<int> sequenceLinks, std::vector<mlmp::common::Point> pinnedPositions, double linkLength, unsigned int numRobots, unsigned int numLinks, SpaceInformationPtr si)
+    PlannerPtr GetQMPStar(std::vector<SpaceInformationPtr> si_vec, std::vector<int> sequenceLinks, unsigned int numLinks) {
+        auto planner = std::make_shared< ompl::multilevel::QMPStar>(si_vec);
+            std::string qName = "QMPStar[";
+
+            for (unsigned int k = 0; k < sequenceLinks.size(); k++)
+            {
+                int links = sequenceLinks.at(k);
+                qName += std::to_string(links) + ",";
+            }
+            qName += std::to_string(numLinks);
+            qName += "]";
+            planner->setName(qName);
+            return planner;
+    }
+
+    PlannerPtr GetQRRTStar(std::vector<SpaceInformationPtr> si_vec, std::vector<int> sequenceLinks, unsigned int numLinks) {
+        auto planner = std::make_shared< ompl::multilevel::QRRTStar>(si_vec);
+        std::string qName = "QRRTStar[";
+
+        for (unsigned int k = 0; k < sequenceLinks.size(); k++)
+        {
+            int links = sequenceLinks.at(k);
+            qName += std::to_string(links) + ",";
+        }
+        qName += std::to_string(numLinks);
+        qName += "]";
+        planner->setName(qName);
+        return planner;
+    }
+
+    PlannerPtr GetQMP(std::vector<SpaceInformationPtr> si_vec, std::vector<int> sequenceLinks, unsigned int numLinks) {
+        auto planner = std::make_shared< ompl::multilevel::QMP>(si_vec);
+        std::string qName = "QMP[";
+
+        for (unsigned int k = 0; k < sequenceLinks.size(); k++)
+        {
+            int links = sequenceLinks.at(k);
+            qName += std::to_string(links) + ",";
+        }
+        qName += std::to_string(numLinks);
+        qName += "]";
+        planner->setName(qName);
+        return planner;
+    }
+
+    PlannerPtr GetQRRT(std::vector<SpaceInformationPtr> si_vec, std::vector<int> sequenceLinks, unsigned int numLinks) {
+        auto planner = std::make_shared< ompl::multilevel::QRRT>(si_vec);
+        std::string qName = "QRRT[";
+
+        for (unsigned int k = 0; k < sequenceLinks.size(); k++)
+        {
+            int links = sequenceLinks.at(k);
+            qName += std::to_string(links) + ",";
+        }
+        qName += std::to_string(numLinks);
+        qName += "]";
+        planner->setName(qName);
+        return planner;
+    }
+
+    PlannerPtr GetBiQRRT(std::vector<SpaceInformationPtr> si_vec, std::vector<int> sequenceLinks, unsigned int numLinks) {
+        auto planner = std::make_shared< ompl::multilevel::BiQRRT>(si_vec);
+        std::string qName = "BiQRRT[";
+
+        for (unsigned int k = 0; k < sequenceLinks.size(); k++)
+        {
+            int links = sequenceLinks.at(k);
+            qName += std::to_string(links) + ",";
+        }
+        qName += std::to_string(numLinks);
+        qName += "]";
+        planner->setName(qName);
+        return planner;
+    }
+
+
+    PlannerPtr GetPlanner(std::string algo, std::vector<int> sequenceLinks, std::vector<mlmp::common::Point> pinnedPositions, double linkLength, unsigned int numRobots, unsigned int numLinks, SpaceInformationPtr si)
     {
         std::vector<SpaceInformationPtr> si_vec;
     
@@ -38,19 +115,24 @@ namespace mlmp {
     
         OMPL_INFORM("Add Original Chain with %d links, and %d robots", numLinks, numRobots);
         si_vec.push_back(si);
-    
-        auto planner = std::make_shared<ompl::multilevel::BiQRRT>(si_vec);
-    
-        std::string qName = "BiQRRT[";
-        for (unsigned int k = 0; k < sequenceLinks.size(); k++)
-        {
-            int links = sequenceLinks.at(k);
-            qName += std::to_string(links) + ",";
+        
+        if (algo == "BiQRRT") {
+            return GetBiQRRT(si_vec, sequenceLinks, numLinks);
         }
-        qName += std::to_string(numLinks);
-        qName += "]";
-        planner->setName(qName);
-        return planner;
+        if (algo == "QRRT") {
+            return GetQRRT(si_vec, sequenceLinks, numLinks);
+        }
+        if (algo == "QMP") {
+            return GetQMP(si_vec, sequenceLinks, numLinks);
+        }
+        if (algo == "QRRTStar") {
+            return GetQRRTStar(si_vec, sequenceLinks, numLinks);
+        }
+        if (algo == "QMPStar") {
+            return GetQMPStar(si_vec, sequenceLinks, numLinks);
+        }
+        throw std::runtime_error("Incompatible algorithm: " + algo);
+        
     }
     
     
@@ -58,17 +140,14 @@ namespace mlmp {
         Scene scene;
         ProblemDefinitionPtr pdef;
         std::vector<SpaceInformationPtr> siVec;
-        bool verbose;
 
         public:
 
-        Solver(Scene scene, bool debug) : scene(scene), verbose(debug) {}
+        Solver(Scene scene) : scene(scene) {}
 
-        void solve(double& timeLimit) {
-            if (verbose) {
-                std::cout<<"------On solver::solve------"<<std::endl;
-                std::cout<<"robots "<<scene.getR()<<" | joints "<<scene.getN()<<std::endl;
-            }
+        void solve(std::string algo, double& timeLimit) {
+            OMPL_DEBUG("------On solver::solve------");
+            OMPL_DEBUG("robots %d joints %d", scene.getR(), scene.getN());
 
             std::vector<mlmp::common::Segment> commonSegments = scene.getObstaclesSegments();
             Environment env = commonSegments;
@@ -108,25 +187,32 @@ namespace mlmp {
             
             std::vector<int> discrete;
             boost::push_back(discrete, boost::irange(2, scene.getN() + 1));
-            ompl::base::PlannerPtr planner = GetPlanner(discrete, scene.getPinnedPositions(), scene.getJointLength(), scene.getR(), scene.getN(), ss.getSpaceInformation());
-
+            ompl::base::PlannerPtr planner = GetPlanner(algo, discrete, scene.getPinnedPositions(), scene.getJointLength(), scene.getR(), scene.getN(), ss.getSpaceInformation());
+            if (planner == nullptr) {
+                OMPL_DEBUG("Incompatible algorithm");
+                return;
+            }
             ss.setPlanner(planner);
             
             PlannerStatus status = ss.solve(timeLimit);
-        
+
             double timeToCompute = ss.getLastPlanComputationTime();
-        
             if (status)
             {
                 const ompl::base::ProblemDefinitionPtr pdef = planner->getProblemDefinition();
-                std::cout << std::string(80, '-') << std::endl;
-                pdef->getSolutionPath()->print(std::cout);
-                std::cout << std::string(80, '-') << std::endl;           
+                ob::PathPtr path = pdef->getSolutionPath();
+                og::PathSimplifierPtr simplifier = ss.getPathSimplifier();
+                simplifier->simplifyMax(*(path->as<og::PathGeometric>()));
+                pdef->getSolutionPath()->print(std::cout);  
+                std::cout<<std::string(80, '*')<<std::endl;
+                std::cout<<"Length\n"<<pdef->getSolutionPath()->length()<<std::endl; 
+                std::cout<<std::string(80, '*')<<std::endl;        
+                std::cout<<"Runtime\n"<<timeToCompute<<std::endl;
             }
             else
             {
-                OMPL_ERROR("Failed finding solution after %f seconds.", timeToCompute);
-            }
+                std::cout<<"Not Found"<<std::endl;
+            }   
         }
     };
 }

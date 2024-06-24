@@ -114,17 +114,8 @@ void BiQRRTImpl::grow()
     activeInitialTree_ = !activeInitialTree_;
     TreeData &otherTree = activeInitialTree_ ? treeStart_ : treeGoal_;
 
-    //###########################################################
-    //(1) Get Uniform Random Sample
     sampleBundle(xRandom_->state);
-
-    //###########################################################
-    //(2) Get Nearest in Current Highlighted Tree
     const Configuration *xNearest = tree->nearest(xRandom_);
-
-    //###########################################################
-    //(3) Connect Nearest to Random (within range)
-    // Configuration *xNext = extendGraphTowards_Range(xNearest, xRandom_);
 
     double d = distance(xNearest, xRandom_);
     if (d > maxDistance_)
@@ -144,11 +135,8 @@ void BiQRRTImpl::grow()
     tree->add(xNext);
     addBundleEdge(xNearest, xNext);
 
-    //###########################################################
-    //(4) If extension was successful, check if we reached goal
     if (xNext && !hasSolution_)
     {
-        /* update distance between trees */
         Configuration *xOtherTree = otherTree->nearest(xNext);
         const double newDist = tree->getDistanceFunction()(xNext, xOtherTree);
         if (newDist < distanceBetweenTrees_)

@@ -16,6 +16,7 @@
 #include <ompl/multilevel/planners/qrrt/QRRT.h>
 
 using namespace ompl::base;
+using namespace ompl::multilevel;
 
 using SE3State = ScopedState<SE3StateSpace>;
 using SO3State = ScopedState<SO3StateSpace>;
@@ -24,24 +25,34 @@ const double pi = boost::math::constants::pi<double>();
 
 namespace po = boost::program_options;
 
+
+void validate_algorithm(const std::string& value, const std::set<std::string>& allowed_values) {
+    if (allowed_values.find(value) == allowed_values.end()) {
+        throw po::validation_error(po::validation_error::invalid_option_value, value);
+    }
+}
+
 void parse_arguments(int ac, char* av[], std::string& inputFile,
                                          bool& verbose,
                                          double& timeLimit,
-                                         bool& internalV) {
+                                         std::string& algo) {
+    std::set<std::string> allowed_algorithms = {"QRRTStar", "QRRT", "BiQRRT", "QMP", "QMPStar"};
+
     // Define the options
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "")
-        ("input-file", po::value<std::string>(&inputFile)->required(), "input file")
-        ("time-limit", po::value<double>(&timeLimit)->default_value(1.0), "run time limit")
-        ("v", po::value<bool>(&verbose)->default_value(false), "verbose")
-        ("iv", po::value<bool>(&internalV)->default_value(false), "internal verbose");
+        ("input-file,i", po::value<std::string>(&inputFile)->required(), "input file")
+        ("time-limit,t", po::value<double>(&timeLimit)->default_value(1.0), "run time limit")
+        ("verbose,v", po::value<bool>(&verbose)->default_value(false), "verbose")
+        ("algo,a", po::value<std::string>(&algo)->default_value("BiQRRT")->notifier([&allowed_algorithms](const std::string& value) {
+                validate_algorithm(value, allowed_algorithms);
+            }), "set the algorithm (allowed values: QMP, QMPStar, QRRT, QRRTStar BiQRRT)");
 
     po::variables_map vm;
     try {
         po::store(po::parse_command_line(ac, av, desc), vm);
         
-        // Handle the help option
         if (vm.count("help")) {
             std::cout << desc << "\n";
             std::exit(1);
@@ -58,16 +69,12 @@ void parse_arguments(int ac, char* av[], std::string& inputFile,
 
 int main(int argc, char* argv[])
 {
-    //############################################################################
-    // Step 1: Setup planning problem using several quotient-spaces
-    //############################################################################
-    // Setup scene
     std::string inputFile = "";
     bool verbose;
-    bool internalV;
     double timeLimit;
+    std::string algoName;
 
-    parse_arguments(argc, argv, inputFile, verbose, timeLimit, internalV);
+    parse_arguments(argc, argv, inputFile, verbose, timeLimit, algoName);
     
     if (inputFile.empty()) {
         std::cerr << "Error: Required arguments are missing.\n";
@@ -79,8 +86,8 @@ int main(int argc, char* argv[])
     }
 
     mlmp::Scene scene;
-    scene.loadScene(inputFile, internalV);
+    scene.loadScene(inputFile);
      
-    mlmp::Solver solver(scene, verbose);
-    solver.solve(timeLimit);
+    mlmp::Solver solver(scene);
+    solver.solve(algoName, timeLimit);
 }

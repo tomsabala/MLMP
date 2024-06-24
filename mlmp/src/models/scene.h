@@ -4,7 +4,6 @@
 #include <fstream>
 
 #include <planar_robot_arm.h>
-#include <abstraction_type.h>
 #include <common/geometry.h>
 
 #include <nlohmann/json.hpp>
@@ -30,7 +29,6 @@ struct FaceInfo {
 };
 
 typedef mlmp::PlanarRobotArm Robot;
-typedef mlmp::abstraction::AbstractionType AbstractionLevel;
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -61,7 +59,6 @@ namespace mlmp {
         std::vector<common::Segment> obstacleSegments;
         // CDT cdt;
         int n;
-        bool verbose;
 
         // void addObstacle(const Polygon& polygon) {
         //     auto prev = polygon.vertices_end();
@@ -179,13 +176,11 @@ namespace mlmp {
 
         public:
     
-        void loadScene(const std::string& filename, bool debug) {
-            if (verbose) {
-                std::cout<<"------On scene::load-scene------"<<std::endl;
-            }
-            verbose=debug;
+        void loadScene(const std::string& filename) {
+            OMPL_DEBUG("------On scene::load-scene------");
             std::ifstream file(filename);
             if (!file.is_open()) {
+                OMPL_DEBUG("Unable to open file: %s", filename.c_str());
                 throw std::runtime_error("Unable to open file: " + filename);
             }
 
@@ -193,6 +188,7 @@ namespace mlmp {
             try {
                 file >> json;
             } catch (const nlohmann::json::parse_error& e) {
+                OMPL_DEBUG("JSON parse error: %s", std::string(e.what()).c_str());
                 throw std::runtime_error("JSON parse error: " + std::string(e.what()));
             }
 
@@ -226,18 +222,6 @@ namespace mlmp {
                 for (const auto& angle : robot["goalAngles"]) {
                     _ga.emplace_back((M_PI*angle.get<int>())/180);
                 }
-                if (verbose) {
-                    std::cout<<"** (In inner loop) start angles: ";
-                    for (const auto& a : _sa) {
-                        std::cout<<a <<" ";
-                    }
-                    std::cout<<std::endl;
-                    std::cout<<"** (In inner loop) goal angles: ";
-                    for (const auto& a : _ga) {
-                        std::cout<<a <<" ";
-                    }
-                    std::cout<<std::endl;
-                }
                 startAngles.emplace_back(_sa);
                 goalAngles.emplace_back(_ga);
             }
@@ -248,17 +232,10 @@ namespace mlmp {
             
             for (const auto& obstacle : json["obstacles"]) {
                 int numPoints = obstacle["points"].size();
-                if (verbose) {
-                    std::cout<<obstacle["info"]<<std::endl;
-                }
                 // Polygon polygon;
                 for (auto i=0; i<obstacle["points"].size(); ++i) {
                     obstacleSegments.push_back(common::Segment(obstacle["points"][i]["x"].get<double>(), obstacle["points"][i]["y"].get<double>(),
                                                        obstacle["points"][(i+1)%numPoints]["x"].get<double>(), obstacle["points"][(i+1)%numPoints]["y"].get<double>()));
-                
-                    if (verbose) {
-                        obstacleSegments.back().print();
-                    }   
 
                     minY = fmin(minY, obstacle["points"][i]["y"].get<double>());
                     minX = fmin(minX, obstacle["points"][i]["x"].get<double>());
@@ -267,22 +244,12 @@ namespace mlmp {
                 }
             }
 
-            obstacleSegments.emplace_back(common::Segment(minX, minY, maxX, minY));
-            if (verbose) {
-                        obstacleSegments.back().print();
-                    }
-            obstacleSegments.emplace_back(common::Segment(maxX, minY, maxX, maxY));
-            if (verbose) {
-                        obstacleSegments.back().print();
-                    }
-            obstacleSegments.emplace_back(common::Segment(maxX, maxY, minX, maxY));
-            if (verbose) {
-                        obstacleSegments.back().print();
-                    }
-            obstacleSegments.emplace_back(common::Segment(minX, maxY, minX, minY));
-            if (verbose) {
-                        obstacleSegments.back().print();
-                    }
+            obstacleSegments.emplace_back(common::Segment(minX-1, minY-1, maxX+1, minY-1));
+            obstacleSegments.emplace_back(common::Segment(maxX+1, minY-1, maxX+1, maxY+1));
+            obstacleSegments.emplace_back(common::Segment(maxX+1, maxY+1, minX-1, maxY+1));
+            obstacleSegments.emplace_back(common::Segment(minX-1, maxY+1, minX-1, minY-1));
+
+            OMPL_DEBUG("------END load-scene------");
         }
 
         // bool isStateValid(const ob::State *state, const int& r, const int& j) const {

@@ -17,10 +17,8 @@
 #include <fstream>
 
 
-// the robot and environment are modeled both as a vector of segments.
 using Environment = std::vector<mlmp::common::Segment>;
 
-// simply use a random projection
 class KinematicChainProjector : public ompl::base::ProjectionEvaluator
 {
 public:
@@ -211,7 +209,6 @@ protected:
         return _envIntersectionTest;
     }
 
-    // return true iff env does *not* include a pair of intersecting segments
     bool selfIntersectionTest(const Environment &env) const
     {
         for (unsigned int i = 0; i < env.size(); ++i)
@@ -220,7 +217,7 @@ protected:
                     return false;
         return true;
     }
-    // return true iff no segment in env0 intersects any segment in env1
+
     bool environmentIntersectionTest(const Environment &env0, const Environment &env1) const
     {
         for (const auto &i : env0)
@@ -231,7 +228,7 @@ protected:
                     
         return true;
     }
-    // return true iff segment s0 intersects segment s1
+    
     bool intersectionTest(const mlmp::common::Segment &s0, const mlmp::common::Segment &s1) const
     {
         // adopted from:
@@ -242,20 +239,20 @@ protected:
         double s32_y = s1.y1 - s1.y0;
         double denom = s10_x * s32_y - s32_x * s10_y;
         if (fabs(denom) < std::numeric_limits<double>::epsilon())
-            return false;  // Collinear
+            return false;
         bool denomPositive = denom > 0;
 
         double s02_x = s0.x0 - s1.x0;
         double s02_y = s0.y0 - s1.y0;
         double s_numer = s10_x * s02_y - s10_y * s02_x;
         if ((s_numer < std::numeric_limits<float>::epsilon()) == denomPositive)
-            return false;  // No collision
+            return false;
         double t_numer = s32_x * s02_y - s32_y * s02_x;
         if ((t_numer < std::numeric_limits<float>::epsilon()) == denomPositive)
-            return false;  // No collision
+            return false;
         if (((s_numer - denom > -std::numeric_limits<float>::epsilon()) == denomPositive) ||
             ((t_numer - denom > std::numeric_limits<float>::epsilon()) == denomPositive))
-            return false;  // No collision
+            return false;
         return true;
     }
 
