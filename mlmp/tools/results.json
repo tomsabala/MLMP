@@ -1,0 +1,687 @@
+{
+    "scene1.json": {
+        "BiQRRT": {
+            "1": {
+                "avg_time": 0.328122,
+                "avg_optimality": 16.394373333333334,
+                "success_rate": 0.6
+            },
+            "10": {
+                "avg_time": 2.2372062,
+                "avg_optimality": 13.998553999999999,
+                "success_rate": 1
+            },
+            "30": {
+                "avg_time": 1.75435836,
+                "avg_optimality": 6.235834,
+                "success_rate": 1
+            },
+            "60": {
+                "avg_time": 2.1843966000000004,
+                "avg_optimality": 10.27647,
+                "success_rate": 1
+            },
+            "120": {
+                "avg_time": 2.4162860000000004,
+                "avg_optimality": 16.80654,
+                "success_rate": 1
+            }
+        },
+        "QRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 16.762,
+                "avg_optimality": 2.99783,
+                "success_rate": 0.2
+            },
+            "120": {
+                "avg_time": 58.066075,
+                "avg_optimality": 20.7547875,
+                "success_rate": 0.8
+            }
+        },
+        "QRRTStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 1.71136,
+                "avg_optimality": 1.81564,
+                "success_rate": 0.2
+            },
+            "60": {
+                "avg_time": 54.8543,
+                "avg_optimality": 0.528793,
+                "success_rate": 0.2
+            },
+            "120": {
+                "avg_time": 27.3147,
+                "avg_optimality": 1.3974,
+                "success_rate": 0.2
+            }
+        },
+        "QMP": {
+            "1": {
+                "avg_time": 0.44728650000000003,
+                "avg_optimality": 4.88101,
+                "success_rate": 0.4
+            },
+            "10": {
+                "avg_time": 4.432095,
+                "avg_optimality": 3.852365,
+                "success_rate": 0.4
+            },
+            "30": {
+                "avg_time": 1.7694166666666666,
+                "avg_optimality": 2.841706666666667,
+                "success_rate": 0.6
+            },
+            "60": {
+                "avg_time": 33.418099999999995,
+                "avg_optimality": 5.015565,
+                "success_rate": 0.4
+            },
+            "120": {
+                "avg_time": 20.657802500000003,
+                "avg_optimality": 3.5789875,
+                "success_rate": 0.8
+            }
+        },
+        "QMPStar": {
+            "1": {
+                "avg_time": 0.178727,
+                "avg_optimality": 3.37422,
+                "success_rate": 0.2
+            },
+            "10": {
+                "avg_time": 5.00233325,
+                "avg_optimality": 3.4953575,
+                "success_rate": 0.8
+            },
+            "30": {
+                "avg_time": 2.8314605,
+                "avg_optimality": 5.108512500000001,
+                "success_rate": 0.8
+            },
+            "60": {
+                "avg_time": 7.831858800000001,
+                "avg_optimality": 4.184552,
+                "success_rate": 1
+            },
+            "120": {
+                "avg_time": 2.166443275,
+                "avg_optimality": 5.469505,
+                "success_rate": 0.8
+            }
+        }
+    },
+    "scene2.json": {
+        "BiQRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 26.65835,
+                "avg_optimality": 99.15095,
+                "success_rate": 0.4
+            },
+            "60": {
+                "avg_time": 22.1586,
+                "avg_optimality": 100.96,
+                "success_rate": 0.8
+            },
+            "120": {
+                "avg_time": 41.573828,
+                "avg_optimality": 134.30626,
+                "success_rate": 1
+            }
+        },
+        "QRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 104.3312,
+                "avg_optimality": 108.30199999999999,
+                "success_rate": 0.4
+            }
+        },
+        "QRRTStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            }
+        },
+        "QMP": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 7.011755,
+                "avg_optimality": 106.2144,
+                "success_rate": 0.4
+            },
+            "30": {
+                "avg_time": 10.587570000000001,
+                "avg_optimality": 127.13499999999999,
+                "success_rate": 0.6
+            },
+            "60": {
+                "avg_time": 34.550806666666666,
+                "avg_optimality": 133.009,
+                "success_rate": 0.6
+            },
+            "120": {
+                "avg_time": 47.060925,
+                "avg_optimality": 111.50225,
+                "success_rate": 0.8
+            }
+        },
+        "QMPStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 1.95842,
+                "avg_optimality": 103.147,
+                "success_rate": 0.2
+            },
+            "30": {
+                "avg_time": 17.07773333333333,
+                "avg_optimality": 117.76353333333333,
+                "success_rate": 0.6
+            },
+            "60": {
+                "avg_time": 12.300075,
+                "avg_optimality": 138.3685,
+                "success_rate": 0.4
+            },
+            "120": {
+                "avg_time": 21.359180000000002,
+                "avg_optimality": 111.98479999999999,
+                "success_rate": 1
+            }
+        }
+    },
+    "scene3.json": {
+        "BiQRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 3.84486,
+                "avg_optimality": 57.8003,
+                "success_rate": 0.2
+            },
+            "30": {
+                "avg_time": 11.920923333333334,
+                "avg_optimality": 51.78926666666666,
+                "success_rate": 0.6
+            },
+            "60": {
+                "avg_time": 9.980410000000001,
+                "avg_optimality": 50.06113333333334,
+                "success_rate": 0.6
+            },
+            "120": {
+                "avg_time": 46.1393,
+                "avg_optimality": 64.9344,
+                "success_rate": 0.6
+            }
+        },
+        "QRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 22.43345,
+                "avg_optimality": 29.86795,
+                "success_rate": 0.4
+            },
+            "60": {
+                "avg_time": 35.613,
+                "avg_optimality": 82.20644999999999,
+                "success_rate": 0.4
+            },
+            "120": {
+                "avg_time": 82.86110000000001,
+                "avg_optimality": 92.91333333333334,
+                "success_rate": 0.6
+            }
+        },
+        "QRRTStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 9.35757,
+                "avg_optimality": 20.4932,
+                "success_rate": 0.2
+            },
+            "30": {
+                "avg_time": 12.3928,
+                "avg_optimality": 6.65186,
+                "success_rate": 0.2
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            }
+        },
+        "QMP": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 5.302556666666667,
+                "avg_optimality": 34.12546666666666,
+                "success_rate": 0.6
+            },
+            "30": {
+                "avg_time": 9.14459,
+                "avg_optimality": 39.893499999999996,
+                "success_rate": 0.6
+            },
+            "60": {
+                "avg_time": 49.94023333333333,
+                "avg_optimality": 33.344166666666666,
+                "success_rate": 0.6
+            },
+            "120": {
+                "avg_time": 29.603,
+                "avg_optimality": 41.40705,
+                "success_rate": 0.8
+            }
+        },
+        "QMPStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 5.531039,
+                "avg_optimality": 37.245,
+                "success_rate": 0.6
+            },
+            "30": {
+                "avg_time": 7.09885,
+                "avg_optimality": 29.7518,
+                "success_rate": 0.8
+            },
+            "60": {
+                "avg_time": 9.928533999999999,
+                "avg_optimality": 36.35466,
+                "success_rate": 1
+            },
+            "120": {
+                "avg_time": 36.275533333333335,
+                "avg_optimality": 32.75216666666667,
+                "success_rate": 0.6
+            }
+        }
+    },
+    "scene4.json": {
+        "BiQRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            }
+        },
+        "QRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 8.7086,
+                "avg_optimality": 49.918000000000006,
+                "success_rate": 0.4
+            },
+            "60": {
+                "avg_time": 33.2167,
+                "avg_optimality": 53.9912,
+                "success_rate": 0.2
+            },
+            "120": {
+                "avg_time": 50.84225,
+                "avg_optimality": 187.41085,
+                "success_rate": 0.4
+            }
+        },
+        "QRRTStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            }
+        },
+        "QMP": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 7.33284,
+                "avg_optimality": 39.3986,
+                "success_rate": 0.2
+            },
+            "30": {
+                "avg_time": 9.339395,
+                "avg_optimality": 42.1392,
+                "success_rate": 0.4
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 77.117,
+                "avg_optimality": 49.27333333333333,
+                "success_rate": 0.6
+            }
+        },
+        "QMPStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0.885866,
+                "avg_optimality": 41.9123,
+                "success_rate": 0.2
+            },
+            "60": {
+                "avg_time": 1.50912,
+                "avg_optimality": 37.0149,
+                "success_rate": 0.2
+            },
+            "120": {
+                "avg_time": 54.5888,
+                "avg_optimality": 34.68,
+                "success_rate": 0.2
+            }
+        }
+    },
+    "scene5.json": {
+        "BiQRRT": {
+            "1": {
+                "avg_time": 0.559515,
+                "avg_optimality": 44.7795,
+                "success_rate": 0.2
+            },
+            "10": {
+                "avg_time": 4.633972,
+                "avg_optimality": 76.25286,
+                "success_rate": 1
+            },
+            "30": {
+                "avg_time": 6.492394,
+                "avg_optimality": 80.47652000000001,
+                "success_rate": 1
+            },
+            "60": {
+                "avg_time": 7.656533999999999,
+                "avg_optimality": 80.90626,
+                "success_rate": 1
+            },
+            "120": {
+                "avg_time": 3.0395200000000004,
+                "avg_optimality": 69.46468,
+                "success_rate": 1
+            }
+        },
+        "QRRT": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 8.27254,
+                "avg_optimality": 123.849,
+                "success_rate": 0.2
+            },
+            "60": {
+                "avg_time": 39.68015,
+                "avg_optimality": 64.7291,
+                "success_rate": 0.8
+            },
+            "120": {
+                "avg_time": 46.30614,
+                "avg_optimality": 55.89752000000001,
+                "success_rate": 1
+            }
+        },
+        "QRRTStar": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "60": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "120": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            }
+        },
+        "QMP": {
+            "1": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "10": {
+                "avg_time": 0,
+                "avg_optimality": 0,
+                "success_rate": 0
+            },
+            "30": {
+                "avg_time": 4.5697695000000005,
+                "avg_optimality": 65.03139999999999,
+                "success_rate": 0.4
+            },
+            "60": {
+                "avg_time": 19.0499775,
+                "avg_optimality": 45.33092499999999,
+                "success_rate": 0.8
+            },
+            "120": {
+                "avg_time": 17.328143750000002,
+                "avg_optimality": 57.696825000000004,
+                "success_rate": 0.8
+            }
+        },
+        "QMPStar": {
+            "1": {
+                "avg_time": 0.306188,
+                "avg_optimality": 46.1445,
+                "success_rate": 0.2
+            },
+            "10": {
+                "avg_time": 0.1679585,
+                "avg_optimality": 55.286699999999996,
+                "success_rate": 0.4
+            },
+            "30": {
+                "avg_time": 0.294818,
+                "avg_optimality": 49.3867,
+                "success_rate": 0.2
+            },
+            "60": {
+                "avg_time": 5.280805,
+                "avg_optimality": 50.682050000000004,
+                "success_rate": 0.8
+            },
+            "120": {
+                "avg_time": 26.58800375,
+                "avg_optimality": 46.899300000000004,
+                "success_rate": 0.8
+            }
+        }
+    }
+}
