@@ -37,8 +37,9 @@ Run the following from source.
     ./shell_container.sh
     ```
 ### Compile project
-Make sure you are located in the mlmp directory, and run:
+Make sure you are located in the mlmp directory:
 
+    cd ~/../home/mlmp/mlmp
     ./compile
 
 ** If this from some reason takes more than a couple of minutes, please kill the process and retry.
