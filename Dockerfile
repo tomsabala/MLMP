@@ -41,3 +41,13 @@ RUN apt-get install -y \
 # RUN wget https://github.com/nlohmann/json/releases/download/v3.9.1/json.hpp -O /usr/include/json.hpp
  
 Copy ./mlmp /home/mlmp
+
+RUN apt-get install -y \
+	python3-pip \
+	python3-venv
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+
+RUN pip install numpy matplotlib
