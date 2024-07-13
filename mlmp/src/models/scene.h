@@ -8,11 +8,11 @@
 
 #include <nlohmann/json.hpp>
 
-// #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
-// #include <CGAL/Constrained_Delaunay_triangulation_2.h>
-// #include <CGAL/Constrained_triangulation_plus_2.h>
-// #include <CGAL/Triangulation_face_base_with_info_2.h>
-// #include <CGAL/intersections.h>
+#include <CGAL/Exact_predicates_exact_constructions_kernel.h>
+#include <CGAL/Constrained_Delaunay_triangulation_2.h>
+#include <CGAL/Constrained_triangulation_plus_2.h>
+#include <CGAL/Triangulation_face_base_with_info_2.h>
+#include <CGAL/intersections.h>
 
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
@@ -33,22 +33,20 @@ typedef mlmp::PlanarRobotArm Robot;
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
 
-// typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
+typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
 
-// typedef CGAL::Triangulation_vertex_base_2<K> Vb;
-// typedef CGAL::Triangulation_face_base_with_info_2<FaceInfo, K> Fb;
-// typedef CGAL::Constrained_triangulation_face_base_2<K, Fb> FbC;
-// typedef CGAL::Triangulation_data_structure_2<Vb, FbC> Tds;
-// // typedef CGAL::Exact_predicates_tag Itag;
-// typedef CGAL::Constrained_Delaunay_triangulation_2<K, Tds> CDT;
-// // typedef CGAL::Constrained_triangulation_plus_2<CDT> CDT_plus;
-// typedef CDT::Face_handle Face_handle;
-// typedef CDT::Edge_iterator Edge_iterator;
+typedef CGAL::Triangulation_vertex_base_2<K> Vb;
+typedef CGAL::Triangulation_face_base_with_info_2<FaceInfo, K> Fb;
+typedef CGAL::Constrained_triangulation_face_base_2<K, Fb> FbC;
+typedef CGAL::Triangulation_data_structure_2<Vb, FbC> Tds;
+typedef CGAL::Constrained_Delaunay_triangulation_2<K, Tds> CDT;
+typedef CDT::Face_handle Face_handle;
+typedef CDT::Edge_iterator Edge_iterator;
 
-// typedef CGAL::Polygon_2<K> Polygon;
-// typedef K::Point_2 Point;
-// typedef K::Segment_2 Segment;
-// typedef CDT::Edge Edge;
+typedef CGAL::Polygon_2<K> Polygon;
+typedef K::Point_2 Point;
+typedef K::Segment_2 CGAL_Segment;
+typedef CDT::Edge Edge;
 
 
 namespace mlmp {
@@ -57,19 +55,15 @@ namespace mlmp {
         std::vector<std::vector<double>> startAngles;
         std::vector<std::vector<double>> goalAngles;
         std::vector<common::Segment> obstacleSegments;
-        // CDT cdt;
+        CDT cdt;
         int n;
 
-        // void addObstacle(const Polygon& polygon) {
-        //     auto prev = polygon.vertices_end();
-        //     for (auto it = polygon.vertices_begin(); it != polygon.vertices_end(); ++it) {
-        //         if (prev != polygon.vertices_end()) {
-        //             cdt.insert_constraint(*prev, *it);
-        //         }
-        //         prev = it;
-        //     }
-        //     cdt.insert_constraint(*prev, *polygon.vertices_begin());
-        // }
+        void buildCDT(std::vector<common::Segment> segments) {
+            for (auto segment : segments) {
+                CGAL_Segment seg(Point(segment.x0, segment.y0), Point(segment.x1, segment.y1));
+                cdt.insert_constraint(seg);
+            }
+        }
 
         void addRobot(const Robot& robot) {
             robots.emplace_back(robot);
@@ -106,73 +100,73 @@ namespace mlmp {
         // }
 
         // Function to check if a segment is valid by walking along it and checking face validity
-        // bool isArmValid(const std::vector<Segment> &arm) const {
-        //     if (verbose) {
-        //         std::cout<<"------On scene::is-arm-valid------"<<std::endl;
-        //     }
-        //     for (const auto& segment : arm) {
-        //         if (verbose) {
-        //             std::cout<<"seg: " << segment<< "\n";
-        //         }
-        //         // Walk through the segment
-        //         Face_handle face = cdt.locate(segment.source());
-        //         std::set<Point> setOfIntersection;
+        bool isArmValid(const std::vector<Segment> &arm) const {
+            if (verbose) {
+                std::cout<<"------On scene::is-arm-valid------"<<std::endl;
+            }
+            for (const auto& segment : arm) {
+                if (verbose) {
+                    std::cout<<"seg: " << segment<< "\n";
+                }
+                // Walk through the segment
+                Face_handle face = cdt.locate(segment.source());
+                std::set<Point> setOfIntersection;
 
-        //         if (face != nullptr) {
-        //             do {
-        //                 if (verbose) {
-        //                     std::cout<<"** (In inner loop) "<< face->info().info << std::endl;
-        //                 }
+                if (face != nullptr) {
+                    do {
+                        if (verbose) {
+                            std::cout<<"** (In inner loop) "<< face->info().info << std::endl;
+                        }
 
-        //                 if (face->info().isObstacle) {
-        //                     return false;
-        //                 }
+                        if (face->info().isObstacle) {
+                            return false;
+                        }
 
-        //                 // Find the next face intersected by the segment
-        //                 boost::optional<std::pair<Point, Face_handle>> intersection;
-        //                 for (int i = 0; i < 3; ++i) {
-        //                     Edge edge(face, i);
-        //                     Point p1 = edge.first->vertex((i + 1) % 3)->point();
-        //                     Point p2 = edge.first->vertex((i + 2) % 3)->point();
-        //                     Segment edge_segment(p1, p2);
-        //                     if (verbose) {
-        //                         std::cout<<"** (In inner loop) edge: "<<edge_segment<<"\n"; 
-        //                     }
-        //                     auto result = CGAL::intersection(segment, edge_segment);
-        //                     if (result) {
-        //                         if (const Point* ipoint = boost::get<Point>(&*result)) {
-        //                            if (verbose) {
-        //                                 std::cout<<"** (In inner loop) found intersection, with "<< *ipoint<<std::endl;
-        //                             }
-        //                             if(setOfIntersection.find(*ipoint) != setOfIntersection.end()) {
-        //                                 continue;
-        //                             }
-        //                             if (!intersection || CGAL::compare_distance_to_point(segment.source(), *ipoint, intersection->first) == CGAL::SMALLER) {
-        //                                 Face_handle neighbor = face->neighbor(i);
-        //                                 if (cdt.is_constrained(edge)) { // Check if the edge is not constrained
-        //                                     if (verbose) {
-        //                                         std::cout<<"------On scene::is-arm-valid------\nFoundIntersection"<<std::endl;
-        //                                     }
-        //                                     return false;
-        //                                 } else {
-        //                                     intersection = std::make_pair(*ipoint, neighbor);
-        //                                     setOfIntersection.insert(*ipoint);
-        //                                 }
-        //                             }
-        //                         }
-        //                     }
-        //                 }
-        //                 if (!intersection) break;
-        //                 face = intersection->second;
-        //             } while (face != nullptr && !cdt.is_infinite(face));
-        //         }
+                        // Find the next face intersected by the segment
+                        boost::optional<std::pair<Point, Face_handle>> intersection;
+                        for (int i = 0; i < 3; ++i) {
+                            Edge edge(face, i);
+                            Point p1 = edge.first->vertex((i + 1) % 3)->point();
+                            Point p2 = edge.first->vertex((i + 2) % 3)->point();
+                            Segment edge_segment(p1, p2);
+                            if (verbose) {
+                                std::cout<<"** (In inner loop) edge: "<<edge_segment<<"\n"; 
+                            }
+                            auto result = CGAL::intersection(segment, edge_segment);
+                            if (result) {
+                                if (const Point* ipoint = boost::get<Point>(&*result)) {
+                                   if (verbose) {
+                                        std::cout<<"** (In inner loop) found intersection, with "<< *ipoint<<std::endl;
+                                    }
+                                    if(setOfIntersection.find(*ipoint) != setOfIntersection.end()) {
+                                        continue;
+                                    }
+                                    if (!intersection || CGAL::compare_distance_to_point(segment.source(), *ipoint, intersection->first) == CGAL::SMALLER) {
+                                        Face_handle neighbor = face->neighbor(i);
+                                        if (cdt.is_constrained(edge)) { // Check if the edge is not constrained
+                                            if (verbose) {
+                                                std::cout<<"------On scene::is-arm-valid------\nFoundIntersection"<<std::endl;
+                                            }
+                                            return false;
+                                        } else {
+                                            intersection = std::make_pair(*ipoint, neighbor);
+                                            setOfIntersection.insert(*ipoint);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!intersection) break;
+                        face = intersection->second;
+                    } while (face != nullptr && !cdt.is_infinite(face));
+                }
 
-        //     }
-        //     if (verbose) {
-        //         std::cout<<"------"<<std::endl;
-        //     }
-        //     return true;
-        // }
+            }
+            if (verbose) {
+                std::cout<<"------"<<std::endl;
+            }
+            return true;
+        }
 
         public:
     
