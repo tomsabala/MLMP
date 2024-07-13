@@ -1,6 +1,8 @@
 # Motion Planning Experiment
 
-This project implements a new motion planning algorithm extension from the family of [Multi Level Motion Plannera](https://ompl.kavrakilab.org/multiLevelPlanning.html) using [OMPL (Open Motion Planning Library)](https://ompl.kavrakilab.org/index.html). It includes a framework to run experiments with multiple algorithms on different scenes, collect performance data, and visualize the results.
+This project implements a new motion planning algorithm extension from the family of [Multi Level Motion Planner](https://ompl.kavrakilab.org/multiLevelPlanning.html) using [OMPL (Open Motion Planning Library)](https://ompl.kavrakilab.org/index.html). It includes a framework to run experiments with multiple algorithms on different scenes, collect performance data, and visualize the results.
+
+This work is based on the [Multilevel motion planning: A fiber bundle formulation](https://journals.sagepub.com/doi/full/10.1177/02783649231209337) article, written by [Andreas Orthey](https://scholar.google.com/citations?user=bQKreEMAAAAJ), Sohaib Akbar, and [Prof. Marc Toussaint](https://scholar.google.com/citations?user=t2X4Mg8AAAAJ&hl=iw).
 
 ## Table of Contents
 
