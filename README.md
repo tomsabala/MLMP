@@ -1,5 +1,12 @@
 # Motion Planning Experiment
 
+![BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget](docs/biqrrt-vs-qrrt.gif)
+
+Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
+seed: blue is the start tree, red the goal tree, green the solution path lifted out of a solved
+level, and opacity is the bundle level. Step it frame by frame, pick another scene and toggle
+levels in the [trace player](https://tomsabala.github.io/MLMP/).
+
 ```sh
 docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
 ```
@@ -52,7 +59,8 @@ The same seed reproduces the same path (`path_length_raw`, `path_length_simplifi
 not reproduce the iteration counters: the multilevel planners consume the whole `--time-limit`,
 so vertex, sample and check counts track host speed. `--trace-file` writes a separate JSONL
 stream — one header line, then one frame per interval — described under "Track gate" in
-[ROADMAP.md](ROADMAP.md).
+[ROADMAP.md](ROADMAP.md). Each frame vertex carries `level`, `tree` (`start`, `goal`, `path`, or
+`untagged` for planners that do not tag trees), `start`/`goal` flags and a full-dimension `q`.
 
 ### Algorithms
 
@@ -131,6 +139,25 @@ cmake --build ompl/build --target ompl -j && sudo cmake --install ompl/build
 ```
 
 The binary lands at `mlmp/build/mlmp`.
+
+## Trace player
+
+[`docs/`](docs/) is a static scrubber page — no build step, no dependencies — that replays the
+committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, and toggles
+bundle levels. Regenerate everything after a planner change:
+
+```sh
+mlmp/tools/recordTraces.sh mlmp:dev                                  # 12 fixtures + scene copies
+python3 mlmp/tools/traceGif.py --scene scene1 --out docs/biqrrt-vs-qrrt.gif
+```
+
+`recordTraces.sh` records each cell at `--seed 42 --time-limit 10 --trace-interval-ms 50`, then
+packs the raw `mlmp.trace/1` stream into the `mlmp.traceviz/1` fixture under `docs/traces/` with
+`mlmp/tools/packTrace.py`. The packing is not cosmetic: every trace frame re-dumps the whole
+planner graph, so a raw 10 s recording is 0.3–0.9 GB, while the packed fixture is under 1.5 MB.
+It stores each vertex once, truncated to the links that vertex's bundle level actually owns —
+the lifted tail above the level is identity-fibre padding that changes every frame — so a frame
+is just a timestamp plus a vertex and edge count.
 
 ## Experiment harness
 

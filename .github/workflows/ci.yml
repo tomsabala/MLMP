@@ -75,6 +75,35 @@ jobs:
             test "$x" = "$y" || { echo "non-deterministic $k: $x vs $y"; exit 1; }
           done
 
+      - name: Trace contract
+        run: |
+          set -u
+          mkdir -p trace-out
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/trace-out:/out" mlmp:ci \
+            --algo BiQRRT --input-file "$SOLVE_SCENE" --time-limit 3 --seed 42 \
+            --trace-file /out/trace.jsonl > trace-out/run.json && code=0 || code=$?
+          # 3 s is below the measured solve budget, so exit 1 is a legal outcome here.
+          case "$code" in 0|1) ;; *) echo "unexpected exit $code"; exit 1 ;; esac
+          python3 - <<'PY'
+          import json
+          run = json.load(open('trace-out/run.json'))
+          lines = [l for l in open('trace-out/trace.jsonl').read().splitlines() if l]
+          header = json.loads(lines[0])
+          assert header['schema'] == 'mlmp.trace/1', header
+          dim = header['robots'] * header['links']
+          frames = [json.loads(l) for l in lines[1:]]
+          assert frames, 'no frames captured'
+          assert run['trace']['frames'] == len(frames), (run['trace'], len(frames))
+          assert run['trace']['errors'] == 0, run['trace']
+          trees = set()
+          for f in frames:
+              for v in f['vertices']:
+                  assert len(v['q']) == dim, v
+                  trees.add(v['tree'])
+          assert 'start' in trees and 'goal' in trees, trees
+          assert 'untagged' not in trees, 'BiQRRT left vertices untagged'
+          PY
+
       - name: Bad input exits 2
         run: |
           set -u

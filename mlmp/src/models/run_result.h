@@ -87,6 +87,16 @@ inline const char* statusToString(ompl::base::PlannerStatus::StatusType s) {
     }
 }
 
+/* Vertex tagging written by BiQRRTImpl::getPlannerData; 0 for planners that do not tag. */
+inline const char* treeLabel(unsigned int component) {
+    switch (component) {
+        case 1: return "start";
+        case 2: return "goal";
+        case 3: return "path";
+        default: return "untagged";
+    }
+}
+
 namespace detail {
 inline Json optionalToJson(const std::optional<double>& v) {
     return v ? Json(*v) : Json(nullptr);

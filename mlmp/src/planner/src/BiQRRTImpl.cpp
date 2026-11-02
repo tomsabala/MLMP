@@ -4,6 +4,9 @@
 #include <ompl/multilevel/datastructures/graphsampler/GraphSampler.h>
 #include <ompl/multilevel/datastructures/propagators/Geometric.h>
 #include <ompl/multilevel/datastructures/metrics/Geodesic.h>
+#include <ompl/multilevel/datastructures/PlannerDataVertexAnnotated.h>
+
+#include <unordered_set>
 #include <boost/foreach.hpp>
 
 #define foreach BOOST_FOREACH
@@ -162,6 +165,44 @@ void BiQRRTImpl::grow()
 
 void BiQRRTImpl::getPlannerData(ompl::base::PlannerData &data) const
 {
+    /* Vertices this level contributes are appended by the base call; lower levels of the
+     * sequence are already in `data` and belong to other BiQRRTImpl instances with their
+     * own trees, so only the appended range may be tagged. */
+    const unsigned int firstNew = data.numVertices();
     BaseT::getPlannerData(data);
-    OMPL_DEBUG(" Start Tree has %d vertices, Goal Tree has %d vertices.", treeStart_->size(), treeGoal_->size());
+
+    std::vector<Configuration *> startNodes;
+    std::vector<Configuration *> goalNodes;
+    if (treeStart_)
+        treeStart_->list(startNodes);
+    if (treeGoal_)
+        treeGoal_->list(goalNodes);
+
+    std::unordered_set<const ompl::base::State *> startStates;
+    std::unordered_set<const ompl::base::State *> goalStates;
+    for (const Configuration *q : startNodes)
+        startStates.insert(q->state);
+    for (const Configuration *q : goalNodes)
+        goalStates.insert(q->state);
+
+    for (unsigned int i = firstNew; i < data.numVertices(); ++i)
+    {
+        auto *v = dynamic_cast<PlannerDataVertexAnnotated *>(&data.getVertex(i));
+        if (v == nullptr)
+            continue;
+        /* Mode-independent: the sequence lifts states into the total space only after this
+         * call returns, but getBaseState() is correct either way. */
+        const ompl::base::State *s = v->getBaseState();
+        if (startStates.count(s) > 0)
+            v->setComponent(1);
+        else if (goalStates.count(s) > 0)
+            v->setComponent(2);
+        else
+            /* Not in either tree: an OMPL-injected solution-path state
+             * (BundleSpaceGraph.cpp:804-823). */
+            v->setComponent(3);
+    }
+
+    OMPL_DEBUG(" Start Tree has %d vertices, Goal Tree has %d vertices.", treeStart_->size(),
+               treeGoal_->size());
 }

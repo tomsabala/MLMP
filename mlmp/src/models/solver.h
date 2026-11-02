@@ -401,8 +401,10 @@ private:
                 space->copyToReals(q, v.getState());
             }
 
+            const unsigned int component = annotated ? annotated->getComponent() : 0u;
             vertices.push_back(Json{{"level", annotated ? annotated->getLevel() : 0u},
-                                    {"component", annotated ? annotated->getComponent() : 0u},
+                                    {"component", component},
+                                    {"tree", treeLabel(component)},
                                     {"start", data.isStartVertex(i)},
                                     {"goal", data.isGoalVertex(i)},
                                     {"q", q}});
