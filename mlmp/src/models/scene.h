@@ -1,6 +1,7 @@
 #ifndef SCENE_H
 #define SCENE_H
 
+#include <cfloat>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -14,10 +15,9 @@
 #include <ompl/util/Console.h>
 
 #include <common/geometry.h>
-#include <planar_robot_arm.h>
+#include <models/planar_robot_arm.h>
 
 namespace ob = ompl::base;
-namespace og = ompl::geometric;
 
 namespace mlmp {
 
@@ -50,8 +50,8 @@ public:
 
         double minX = DBL_MAX;
         double minY = DBL_MAX;
-        double maxX = DBL_MIN;
-        double maxY = DBL_MIN;
+        double maxX = -DBL_MAX;
+        double maxY = -DBL_MAX;
 
         loadRobots(json, minX, minY, maxX, maxY);
         loadObstacles(json, minX, minY, maxX, maxY);

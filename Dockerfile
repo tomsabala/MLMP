@@ -1,53 +1,39 @@
-From ubuntu:23.04
+# syntax=docker/dockerfile:1
+FROM ubuntu:24.04 AS builder
+ARG OMPL_VERSION=1.7.0
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates \
+        libboost-serialization-dev libboost-filesystem-dev libboost-system-dev \
+        libboost-program-options-dev libeigen3-dev nlohmann-json3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt update -y
-RUN apt install -y libeigen3-dev
-RUN apt install -y libboost-all-dev
-RUN apt install -y curl
-RUN apt install -y clang
-RUN apt install -y wget
-RUN apt install -y build-essential
+RUN git clone --depth 1 -b "${OMPL_VERSION}" https://github.com/ompl/ompl.git /src/ompl \
+ && cmake -S /src/ompl -B /src/ompl/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DOMPL_BUILD_TESTS=OFF \
+        -DOMPL_REGISTRATION=OFF \
+ && cmake --build /src/ompl/build --target ompl -j"$(nproc)" \
+ && cmake --install /src/ompl/build \
+ && DESTDIR=/stage cmake --install /src/ompl/build \
+ && rm -rf /src/ompl/build /src/ompl/.git
 
+COPY mlmp /src/mlmp
+RUN cmake -S /src/mlmp -B /src/mlmp/build -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build /src/mlmp/build -j"$(nproc)"
 
-ENV CC /usr/bin/clang-15
-ENV CXX /usr/bin/clang++-15
-
-RUN apt install -y git cmake
-
-#RUN apt install python
-
-#RUN curl https://ompl.kavrakilab.org/install-ompl-ubuntu.sh -o /tmp/install-ompl-ubuntu.sh && \
-#    chmod u+x /tmp/install-ompl-ubuntu.sh && \
-#    /tmp/install-ompl-ubuntu.sh
-
-RUN cd /home && git clone --depth 1 -b 1.6.0 https://github.com/ompl/ompl.git ompl-1.6
-
-RUN cd /home/ompl-1.6 && \ 
-    mkdir -p build/Release && \
-    cd build/Release && \
-    cmake ../.. && \
-    make
-
-RUN cd /home/ompl-1.6 && \ 
-    cd build/Release && \
-    make install
-
-RUN apt-get install -y \
-    libcgal-dev \
-    libgmp-dev \
-    libmpfr-dev
-
-# Install nlohmann_json
-# RUN wget https://github.com/nlohmann/json/releases/download/v3.9.1/json.hpp -O /usr/include/json.hpp
- 
-Copy ./mlmp /home/mlmp
-
-RUN apt-get install -y \
-	python3-pip \
-	python3-venv
-
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-
-RUN pip install numpy matplotlib
+FROM ubuntu:24.04 AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libboost-serialization1.83.0 libboost-filesystem1.83.0 \
+        libboost-program-options1.83.0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /stage/usr/local/lib/ /usr/local/lib/
+COPY --from=builder /src/mlmp/build/mlmp /usr/local/bin/mlmp
+COPY --from=builder /src/mlmp/src/inputs/experiment/ /opt/mlmp/scenes/
+COPY --from=builder /src/mlmp/src/inputs/*.json /opt/mlmp/scenes/dev/
+RUN ldconfig
+ENV MLMP_SCENE_DIR=/opt/mlmp/scenes
+ENTRYPOINT ["/usr/local/bin/mlmp"]
+CMD ["--help"]

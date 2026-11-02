@@ -1,0 +1,55 @@
+name: ci
+
+on: [push, pull_request]
+
+env:
+  # Smoke scene: hard enough that no planner is expected to solve it in 2 s, so the
+  # loop below asserts "runs without crashing" rather than competitiveness.
+  SMOKE_SCENE: scene4.json
+  # Solve scene: BiQRRT measured 3/3 at --time-limit 10 and 3/3 at 30 (scene5 also 3/3).
+  # BiQRRT only: QRRT solved no scene 3/3, its best was scene1 2/3 at 30 s, so gating on
+  # it would be flaky. Tracked as an open item in Phase 2 of ROADMAP.md.
+  SOLVE_SCENE: scene1.json
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mlmp:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke every planner
+        run: |
+          set -u
+          failed=0
+          for a in BiQRRT QRRT QRRTStar QMP QMPStar \
+                   RRT RRTConnect PRMStar BITStar AITStar EITStar LBKPIECE; do
+            docker run --rm mlmp:ci --algo "$a" --input-file "$SMOKE_SCENE" --time-limit 2 \
+              >/dev/null 2>&1 && code=0 || code=$?
+            case "$code" in
+              0) echo "ok   $a (solved)" ;;
+              1) echo "ok   $a (no solution in budget)" ;;
+              *) echo "FAIL $a (exit $code)"; failed=1 ;;
+            esac
+          done
+          exit "$failed"
+
+      - name: Solve check
+        run: |
+          set -eu
+          docker run --rm mlmp:ci --algo BiQRRT --input-file "$SOLVE_SCENE" --time-limit 10
+
+      - name: Bad input exits 2
+        run: |
+          set -u
+          docker run --rm mlmp:ci --input-file does-not-exist.json && code=0 || code=$?
+          test "$code" -eq 2 || { echo "expected exit 2, got $code"; exit 1; }

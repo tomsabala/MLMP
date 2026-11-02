@@ -1,55 +1,24 @@
-cmake_minimum_required(VERSION 3.10)
-project(mlmp)
+cmake_minimum_required(VERSION 3.22)
+project(mlmp CXX)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src)
-
-# Set the rounding math flag for GCC or Clang
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frounding-math")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Set the rounding math flag for Intel compiler
-if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fp-model strict")
-endif()
-
-find_package(CGAL REQUIRED COMPONENTS Core)
-# find_package(nlohmann_json REQUIRED)
-find_package(ompl REQUIRED)
+find_package(ompl 1.7 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(nlohmann_json 3.11 REQUIRED)
 
-if(Boost_FOUND)
-    include_directories(${Boost_INCLUDE_DIRS})
-endif()
-
-include(FetchContent)
-
-FetchContent_Declare(
-  nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG v3.11.2
-)
-
-FetchContent_MakeAvailable(nlohmann_json)
-
-include_directories(
-    ${EIGEN_INCLUDE_DIR}
-    ${OMPL_INCLUDE_DIRS}
-    ${CGAL_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/tools
-    ${CMAKE_SOURCE_DIR}/src/planner
-    ${CMAKE_SOURCE_DIR}/src/planner/src
-    ${CMAKE_SOURCE_DIR}/src/models
-    ${CMAKE_SOURCE_DIR}/src/state
-    ${CMAKE_SOURCE_DIR}/src/common
-)
-
-add_executable(
-    mlmp 
+add_executable(mlmp
     src/main.cpp
     src/planner/src/BiQRRTImpl.cpp
 )
 
-target_link_libraries(mlmp ${OMPL_LIBRARIES} CGAL::CGAL nlohmann_json::nlohmann_json Boost::program_options)
-
+target_include_directories(mlmp PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(mlmp PRIVATE
+    ompl::ompl
+    Boost::program_options
+    nlohmann_json::nlohmann_json
+)

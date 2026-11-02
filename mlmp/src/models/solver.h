@@ -2,21 +2,60 @@
 #define SOLVER_H
 
 #include <cmath>
+#include <set>
+#include <string>
 #include <boost/range/algorithm_ext/push_back.hpp>
 
-#include <scene.h>
+#include <models/scene.h>
 #include <state/kinematic_chain.h>
 #include "common/geometry.h"
 
 #include <ompl/base/SpaceInformation.h>
+#include <ompl/geometric/SimpleSetup.h>
+
+#include <ompl/geometric/planners/rrt/RRT.h>
+#include <ompl/geometric/planners/rrt/RRTConnect.h>
+#include <ompl/geometric/planners/prm/PRMstar.h>
+#include <ompl/geometric/planners/informedtrees/BITstar.h>
+#include <ompl/geometric/planners/informedtrees/AITstar.h>
+#include <ompl/geometric/planners/informedtrees/EITstar.h>
+#include <ompl/geometric/planners/kpiece/LBKPIECE1.h>
+
 #include <ompl/multilevel/planners/qrrt/QRRT.h>
 #include <ompl/multilevel/planners/qmp/QMP.h>
 #include <ompl/multilevel/planners/qrrt/QRRTStar.h>
 #include <ompl/multilevel/planners/qmp/QMPStar.h>
+#include <planner/BiQRRT.h>
+
+namespace og = ompl::geometric;
 
 using namespace ompl::base;
 
 namespace mlmp {
+
+/* The supported planner set. These two sets are the single source of truth:
+ * the CLI validates against them and GetPlanner dispatches on them. */
+inline const std::set<std::string> kMultilevelAlgorithms = {
+    "BiQRRT", "QRRT", "QRRTStar", "QMP", "QMPStar"};
+inline const std::set<std::string> kSingleLevelAlgorithms = {
+    "RRT", "RRTConnect", "PRMStar", "BITStar", "AITStar", "EITStar", "LBKPIECE"};
+
+inline bool isSupportedAlgorithm(const std::string& algo) {
+    return kMultilevelAlgorithms.count(algo) > 0 || kSingleLevelAlgorithms.count(algo) > 0;
+}
+
+inline std::string supportedAlgorithmList() {
+    std::string list;
+    for (const auto* group : {&kMultilevelAlgorithms, &kSingleLevelAlgorithms}) {
+        for (const auto& name : *group) {
+            if (!list.empty()) {
+                list += ", ";
+            }
+            list += name;
+        }
+    }
+    return list;
+}
 
 namespace {
     std::vector<Environment> envs;
@@ -34,12 +73,40 @@ namespace {
 
     template<typename PlannerType>
     PlannerPtr createPlanner(const std::string& baseName,
-                             const std::vector<SpaceInformationPtr>& si_vec,
+                             /* BundleSpaceSequence takes siVec by non-const reference. */
+                             std::vector<SpaceInformationPtr>& si_vec,
                              const std::vector<int>& sequenceLinks,
                              unsigned int numLinks) {
         auto planner = std::make_shared<PlannerType>(si_vec);
         planner->setName(buildPlannerName(baseName, sequenceLinks, numLinks));
         return planner;
+    }
+
+    PlannerPtr makeSingleLevelPlanner(const std::string& algo, const SpaceInformationPtr& si) {
+        if (algo == "RRT") {
+            return std::make_shared<og::RRT>(si);
+        }
+        if (algo == "RRTConnect") {
+            return std::make_shared<og::RRTConnect>(si);
+        }
+        if (algo == "PRMStar") {
+            return std::make_shared<og::PRMstar>(si);
+        }
+        if (algo == "BITStar") {
+            return std::make_shared<og::BITstar>(si);
+        }
+        if (algo == "AITStar") {
+            return std::make_shared<og::AITstar>(si);
+        }
+        if (algo == "EITStar") {
+            return std::make_shared<og::EITstar>(si);
+        }
+        if (algo == "LBKPIECE") {
+            /* Uses KinematicChainSpace's default projection, registered in
+             * KinematicChainSpace::registerProjections. */
+            return std::make_shared<og::LBKPIECE1>(si);
+        }
+        throw std::runtime_error("Incompatible algorithm: " + algo);
     }
 }
 
@@ -50,6 +117,12 @@ namespace {
                           unsigned int numRobots,
                           unsigned int numLinks,
                           SpaceInformationPtr si) {
+        /* Single-level planners plan directly on the full chain; building the
+         * abstraction spaces for them would be pointless work. */
+        if (kSingleLevelAlgorithms.count(algo) > 0) {
+            return makeSingleLevelPlanner(algo, si);
+        }
+
         std::vector<SpaceInformationPtr> si_vec;
 
         for (unsigned int k = 0; k < sequenceLinks.size(); k++) {
@@ -92,7 +165,7 @@ namespace {
     public:
         explicit Solver(const Scene& scene) : scene_(scene) {}
 
-        void solve(const std::string& algo, double timeLimit) {
+        bool solve(const std::string& algo, double timeLimit) {
             OMPL_DEBUG("------On solver::solve------");
             OMPL_DEBUG("robots %d joints %d", scene_.getR(), scene_.getN());
 
@@ -126,11 +199,6 @@ namespace {
                 scene_.getJointLength(), scene_.getR(), scene_.getN(),
                 ss.getSpaceInformation());
 
-            if (!planner) {
-                OMPL_DEBUG("Incompatible algorithm");
-                return;
-            }
-
             ss.setPlanner(planner);
             PlannerStatus status = ss.solve(timeLimit);
             double timeToCompute = ss.getLastPlanComputationTime();
@@ -148,6 +216,8 @@ namespace {
             } else {
                 std::cout << "Not Found" << std::endl;
             }
+
+            return static_cast<bool>(status);
         }
 
     private:

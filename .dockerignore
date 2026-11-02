@@ -1,0 +1,5 @@
+mlmp/build/
+.git/
+.vscode/
+**/__pycache__/
+*.md

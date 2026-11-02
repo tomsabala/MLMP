@@ -1,83 +1,111 @@
 # Motion Planning Experiment
 
-This project implements a new motion planning algorithm extension from the family of [Multi Level Motion Planner](https://ompl.kavrakilab.org/multiLevelPlanning.html) using [OMPL (Open Motion Planning Library)](https://ompl.kavrakilab.org/index.html). It includes a framework to run experiments with multiple algorithms on different scenes, collect performance data, and visualize the results.
+```sh
+docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
+```
 
-This work is based on the [Multilevel motion planning: A fiber bundle formulation](https://journals.sagepub.com/doi/full/10.1177/02783649231209337) article, written by [Andreas Orthey](https://scholar.google.com/citations?user=bQKreEMAAAAJ), Sohaib Akbar, and [Prof. Marc Toussaint](https://scholar.google.com/citations?user=t2X4Mg8AAAAJ&hl=iw).
+A 2D multi-robot kinematic-chain motion-planning experiment built on OMPL's
+[`ompl::multilevel`](https://ompl.kavrakilab.org/multiLevelPlanning.html) bundle-space planners,
+plus a custom bidirectional bundle-space planner, `BiQRRT`.
 
-## Table of Contents
+The work follows [Multilevel motion planning: A fiber bundle formulation](https://journals.sagepub.com/doi/full/10.1177/02783649231209337)
+by [Andreas Orthey](https://scholar.google.com/citations?user=bQKreEMAAAAJ), Sohaib Akbar, and
+[Prof. Marc Toussaint](https://scholar.google.com/citations?user=t2X4Mg8AAAAJ&hl=iw).
 
-- [Description](#description)
-- [How to use](#how-to-use)
+See [ROADMAP.md](ROADMAP.md) for where this is going.
 
-## Description
+## Usage
 
-The project provides a framework for testing and comparing multi level motion planning algorithms such as QRRT, QRRTStar, QMP, and QMPStar versus BiQRRT, on a familty group of 2D kinematic chain robots. 
+```
+--input-file, -i   scene to plan on (required)
+--time-limit, -t   planning time budget in seconds (default: 1.0)
+--verbose,    -v    OMPL log output (default: false)
+--algo,       -a   planner to run (default: BiQRRT)
+--help             print the option list
+```
 
-It includes a Python script to automate the execution of these algorithms on different scenes with varying time limits and collect performance metrics, and provides several custom made input scenes.
+### Algorithms
 
-## How to use
+**Multilevel (bundle-space) planners** — plan on a sequence of kinematic chains of increasing
+length, lifting solutions up the hierarchy:
 
-The project is written with a heavily dependency on OMPL. For verifying versions alignment, the best way for using this repo is by building a docker image.
+`BiQRRT`, `QRRT`, `QRRTStar`, `QMP`, `QMPStar`
 
-### Prerequisites
+**Single-level baselines** — plan directly on the full chain:
 
-- Docker
+`RRT`, `RRTConnect`, `PRMStar`, `BITStar`, `AITStar`, `EITStar`, `LBKPIECE`
 
-### Building the Docker Image
-Run the following from source.
+The baselines are here to make `BiQRRT` results attributable: `RRT` vs. `RRTConnect` isolates
+bidirectionality and `QRRT` vs. `BiQRRT` isolates it again inside the hierarchy, so a win can be
+credited to the right mechanism rather than to "multilevel" in general. The asymptotically
+optimal planners (`PRMStar`, `BITStar`, `AITStar`, `EITStar`) are the only honest path-length
+comparison for `QRRTStar` and `QMPStar`.
 
-1. Clone the repository:
-    ```sh
-    git clone https://github.com/tomsabala/MLMP.git
-    cd MLMP
-    ```
+### Exit codes
 
-2. Build the Docker image and run container (this might take up to 8-10 minutes):
-    ```sh
-    ./build_image.sh
-    ./run_container.sh
-    ./shell_container.sh
-    ```
-### Compile project
-Make sure you are located in the mlmp directory:
+| Code | Meaning |
+|---|---|
+| 0 | A solution was found |
+| 1 | No solution within the time budget |
+| 2 | Usage error, unknown algorithm, or scene could not be read |
 
-    cd ~/../home/mlmp/mlmp
-    ./compile
+### Scene resolution
 
-** If this from some reason takes more than a couple of minutes, please kill the process and retry.
+`--input-file` is used as-is when it names an existing file. Otherwise it is treated as a bare
+scene name and resolved against `MLMP_SCENE_DIR`, which the image sets to `/opt/mlmp/scenes`.
+Both of these work:
 
-### Usage
+```sh
+docker run --rm ghcr.io/tomsabala/mlmp:latest -a BiQRRT -i scene5.json -t 10
+docker run --rm -v "$PWD/mlmp/src/inputs/experiment:/scenes" ghcr.io/tomsabala/mlmp:latest -i /scenes/scene1.json -t 10
+```
 
-The program accepts the following command-line arguments:
+The baked scenes are the six benchmark scenes `scene1.json`…`scene6.json`, plus the smaller
+development scenes under `dev/`. Of those, BiQRRT solved `scene1` and `scene5` 3/3 at
+`--time-limit 10`, while `scene4` and `scene6` were solved 0/3 by both BiQRRT and QRRT
+at that budget, so expect exit 1 there. Those are stopwatch observations on one host, not a
+benchmark — the real numbers are Phase 2 of the roadmap.
 
-    --input-file: Specifies the input file for the scene (mandatory).
-    --time-limit: Specifies the time limit for the algorithm (default: 1.0).
-    --verbose: Enables verbose output (default: false).
-    --algo: Specifies the algorithm to use (default: BiQRRT, allowed values: RRTStar, PRMStar, QRRT, BiQRRT, QMP, QMPStar).
+## Building
 
-* Python:
-    
-    From the `mlmp/tools` directory, run:
-    
-    `python3 main.py --input-file scene4.json --time-limit 5 --verbose 1 --algo BiQRRT`
+### Image
 
-* C++:
-    
-    From the `mlmp` directory, run:
+```sh
+docker build -t mlmp:dev .
+```
 
-    `./mlmp --input-file ./inputs/experiment/scene4.json --time-limit 5 --verbose 1 --algo BiQRRT`
+The builder stage compiles OMPL from source and then `mlmp`; the runtime stage carries only the
+OMPL shared libraries, the `mlmp` binary and the scenes.
 
+### Local, without Docker
 
-** note the difference in the path requirement of the scene file.
+```sh
+cmake -S mlmp -B mlmp/build && cmake --build mlmp/build -j
+```
 
-### Experiment
+Requires, from the distribution:
 
-From `mlmp/tools` directory, you can run:
+```
+build-essential cmake
+libboost-program-options-dev libboost-serialization-dev libboost-filesystem-dev libboost-system-dev
+libeigen3-dev nlohmann-json3-dev
+```
 
-    python3 experiment.py
+and **OMPL 1.7.0 installed from source** — no Ubuntu release ships it (noble's `libompl-dev` is
+1.5.2, and `EITStar` only exists from 1.7.0 onwards):
 
-Note this is might take some time to evaluate all results.
+```sh
+git clone --depth 1 -b 1.7.0 https://github.com/ompl/ompl.git
+cmake -S ompl -B ompl/build -DCMAKE_BUILD_TYPE=Release -DOMPL_BUILD_TESTS=OFF -DOMPL_REGISTRATION=OFF
+cmake --build ompl/build --target ompl -j && sudo cmake --install ompl/build
+```
+
+The binary lands at `mlmp/build/mlmp`.
+
+## Experiment harness
+
+`mlmp/tools/experiment.py` sweeps algorithms × scenes × time limits and plots the results; it
+expects the binary at `mlmp/build/mlmp` and is run from `mlmp/tools`. It is slated for a rewrite
+— see Phase 2 of the roadmap.
 
 [git link](https://github.com/tomsabala/MLMP)
-
-Enjoy :) 

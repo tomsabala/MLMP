@@ -1,5 +1,5 @@
-#include <../BiQRRTImpl.h>
-#include <../tools/SelfConfig.h>
+#include <planner/BiQRRTImpl.h>
+#include <tools/SelfConfig.h>
 
 #include <ompl/multilevel/datastructures/graphsampler/GraphSampler.h>
 #include <ompl/multilevel/datastructures/propagators/Geometric.h>
@@ -68,6 +68,10 @@ void BiQRRTImpl::init()
         Vertex m = boost::add_vertex(qStart_, graph_);
         disjointSets_.make_set(m);
         qStart_->index = m;
+        /* BundleSpaceGraph::vStart_ has no initialiser and is only assigned by the
+         * base init() we override; getSolution() indexes the graph with it, so
+         * leaving it unset reads uninitialised memory and segfaults. */
+        setStartIndex(m);
         treeStart_->add(qStart_);
     }
 

@@ -1,6 +1,6 @@
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
-#include <set>
 #include <string>
 
 #include <boost/program_options.hpp>
@@ -9,20 +9,31 @@
 
 #include <models/scene.h>
 #include <models/solver.h>
-#include <planner/BiQRRT.h>
 
 namespace po = boost::program_options;
 
 namespace {
 
-const std::set<std::string> ALLOWED_ALGORITHMS = {
-    "QRRTStar", "QRRT", "BiQRRT", "QMP", "QMPStar"
-};
-
 void validateAlgorithm(const std::string& value) {
-    if (ALLOWED_ALGORITHMS.find(value) == ALLOWED_ALGORITHMS.end()) {
+    if (!mlmp::isSupportedAlgorithm(value)) {
         throw po::validation_error(po::validation_error::invalid_option_value, value);
     }
+}
+
+/* A scene argument that names an existing file is used as-is; a bare name is
+ * resolved against MLMP_SCENE_DIR (the published image bakes the scenes in). */
+std::string resolveScenePath(const std::string& inputFile) {
+    namespace fs = std::filesystem;
+    if (fs::exists(inputFile)) {
+        return inputFile;
+    }
+    const char* dir = std::getenv("MLMP_SCENE_DIR");
+    const fs::path candidate = fs::path(dir ? dir : "/opt/mlmp/scenes") / inputFile;
+    if (fs::exists(candidate)) {
+        return candidate.string();
+    }
+    throw std::runtime_error("scene not found: " + inputFile +
+                             " (also tried " + candidate.string() + ")");
 }
 
 void parseArguments(int argc, char* argv[],
@@ -39,7 +50,7 @@ void parseArguments(int argc, char* argv[],
         ("algo,a", po::value<std::string>(&algo)
             ->default_value("BiQRRT")
             ->notifier(validateAlgorithm),
-            "set the algorithm (allowed values: QMP, QMPStar, QRRT, QRRTStar, BiQRRT)");
+            ("set the algorithm (allowed values: " + mlmp::supportedAlgorithmList() + ")").c_str());
 
     po::variables_map vm;
     try {
@@ -54,12 +65,13 @@ void parseArguments(int argc, char* argv[],
     } catch (const po::error& e) {
         std::cerr << "Error: " << e.what() << "\n";
         std::cerr << desc << "\n";
-        std::exit(1);
+        std::exit(2);
     }
 }
 
 }
 
+/* Exit codes: 0 solved, 1 no solution within the time budget, 2 usage/IO error. */
 int main(int argc, char* argv[]) {
     std::string inputFile;
     bool verbose = false;
@@ -70,18 +82,21 @@ int main(int argc, char* argv[]) {
 
     if (inputFile.empty()) {
         std::cerr << "Error: Required arguments are missing.\n";
-        std::exit(1);
+        std::exit(2);
     }
 
     if (!verbose) {
         ompl::msg::setLogLevel(ompl::msg::LOG_NONE);
     }
 
-    mlmp::Scene scene;
-    scene.loadScene(inputFile);
+    try {
+        mlmp::Scene scene;
+        scene.loadScene(resolveScenePath(inputFile));
 
-    mlmp::Solver solver(scene);
-    solver.solve(algoName, timeLimit);
-
-    return 0;
+        mlmp::Solver solver(scene);
+        return solver.solve(algoName, timeLimit) ? 0 : 1;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 2;
+    }
 }

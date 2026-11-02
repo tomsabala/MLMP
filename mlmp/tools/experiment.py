@@ -7,7 +7,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-executablePath = '../src/mlmp'
+executablePath = '../build/mlmp'
 scenes = ['scene2.json']
 algorithms = ['BiQRRT', 'QRRT', 'QRRTStar', 'QMP', 'QMPStar']
 timeLimits = [1, 10, 30, 60, 120]
