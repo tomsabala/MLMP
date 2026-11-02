@@ -115,3 +115,49 @@ jobs:
           assert r["schema"]=="mlmp.run/1", r.get("schema")
           assert r["error"]["kind"]=="io", r["error"]
           '
+
+  # Parallel to build-and-smoke: the wasm module is a second target of the same sources, and a
+  # break there (threads, filesystem, payload size) is invisible to the native gates.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # A distinct cache scope: the wasm image shares no layer with the native one, and one
+      # scope would make the two jobs evict each other.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.wasm
+          target: dist
+          outputs: type=local,dest=web/dist
+          cache-from: type=gha,scope=wasm
+          cache-to: type=gha,mode=max,scope=wasm
+
+      - name: Renderer copy check
+        run: |
+          set -eu
+          cmp web/src/renderer.js docs/renderer.js
+
+      - name: Renderer unit test
+        run: |
+          set -eu
+          node web/test/renderer.test.mjs
+
+      - name: Payload size gate
+        run: |
+          set -eu
+          wasm=$(gzip -9 -c web/dist/src/mlmp.wasm | wc -c)
+          glue=$(gzip -9 -c web/dist/src/mlmp.mjs | wc -c)
+          total=$((wasm + glue))
+          # Printed whether or not it passes: the roadmap wants the compressed payload measured,
+          # not estimated.
+          echo "gzip -9: mlmp.wasm ${wasm} B + mlmp.mjs ${glue} B = ${total} B"
+          test "$total" -le 5242880 || { echo "over the 5 MiB gzip budget"; exit 1; }
+
+      - name: Node smoke
+        run: |
+          set -eu
+          node web/test/smoke.mjs

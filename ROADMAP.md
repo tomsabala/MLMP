@@ -218,7 +218,10 @@ touch, and what makes it done.
   green on the page is `component == 3`, which is a different thing.
 - **Done when.** `web/src/renderer.js` exists (Track E owns it — step 7 of
   `WASM_PLANNER_PORT_PLAN.md`), `docs/app.js` draws through it, and `showPath` renders the
-  run's solution path.
+  run's solution path. **Done** on `track-e/wasm-browser-planner`: the module ships at
+  `web/src/renderer.js` with a byte-identical committed copy at `docs/renderer.js` (CI runs
+  `cmp` on the pair), `docs/app.js` is a module that imports it, and the two solved runs
+  (`scene1`/`scene5` BiQRRT) now draw their `mlmp.run/1` `path` as connected green arms.
 
 ### Track B — Experiment harness (§2.1–2.4)
 
@@ -283,6 +286,23 @@ touch, and what makes it done.
 - **Done when.** A visitor edits a scene, picks a planner, and sees the trees grow, on a
   static host that sets no special headers — and the live frames are drawn by the same module
   the committed fixtures are.
+- **Shipped** (`track-e/wasm-browser-planner`): `Dockerfile.wasm` (static, thread-free,
+  Boost-component-free OMPL 1.7.0 built with `emscripten/emsdk:6.0.13`), `mlmp/src/wasm/entry.cpp`
+  behind an `if(EMSCRIPTEN)` branch in `mlmp/CMakeLists.txt`, the `web/` playground (module
+  worker + obstacle editor + newest-edit solve queue), `web/src/renderer.js` with its verified
+  `docs/renderer.js` copy, a `wasm` CI job and `pages.yml` publishing `docs/` with the
+  playground at `/live/`.
+- **Measured, not estimated.** Payload `gzip -9`: `mlmp.wasm` 454 511 B + `mlmp.mjs` 22 278 B =
+  476 789 B, 9.1% of the 5 MiB gate. Throughput on one host, traced BiQRRT/`scene1`/seed 42/10 s:
+  native 8 104 vertices and 23 221 samples versus wasm 5 379 and 14 982 — wasm runs at ≈0.65×
+  native. First exact solution 0.10 s native versus 0.9–1.8 s in the browser, which is why the
+  budget slider defaults to 10 s: at 5 s the browser run times out on `scene1`.
+- **Found while building it: a traced multilevel run is not seed-reproducible.** `captureFrame`
+  calls `BundleSpaceSequence::getPlannerData`, whose path-restriction code draws from the global
+  RNG, and captures land on wall-clock boundaries — so the number of draws tracks host speed and
+  `path_length_raw` varies run to run. Untraced runs repeat exactly (verified in both targets).
+  `solveScene` therefore installs no trace sink when given no callback, and both determinism
+  gates compare untraced runs. Track B must not enable `--trace-file` on measurement runs.
 
 ### Track F — Planner hygiene (§2.5)
 

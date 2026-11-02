@@ -1,5 +1,41 @@
 # Track E — run the planner in the browser (wasm)
 
+## Status: implemented on `track-e/wasm-browser-planner`
+
+This document is the design; the branch is the build. Where they differ, the branch is right —
+the five deltas below were forced by things only a build reveals.
+
+1. **`web/src/renderer.js` shipped, with a committed byte-identical copy at `docs/renderer.js`**
+   (CI runs `cmp` on the pair), because `docs/` must stay servable straight from the branch
+   while the Pages source is still "deploy from branch". `showPath` shipped with it, and
+   `docs/app.js` is now a module that imports the pair of them. Constants reproduce
+   `docs/app.js` exactly, not `mlmp/tools/traceGif.py`: the two shipped renderers disagreed on
+   four values (dot radii, edge width, obstacle stroke alpha, joint-dot size), and re-rendering
+   the committed 5.7 MB GIF for a cosmetic match was not worth it. The parity test asserts only
+   what is genuinely shared: `TREE_COLORS`, `PADDING` and the alpha formula.
+2. **`emscripten/emsdk:6.0.13`, not a 3.1.x pin.** A 3.1.64 `-sEXPORT_ES6` module opens with a
+   static `import { createRequire } from 'module'` (unresolvable in a browser) and detects a
+   worker by `typeof importScripts`, which is `undefined` inside a module worker — so it cannot
+   be loaded by `new Worker(url, { type: "module" })` at all. 6.x uses `globalThis.WorkerGlobalScope`
+   and a guarded dynamic `import("node:module")`.
+3. **Six OMPL patches, not three, plus two toolchain fixes.** Besides the Boost-components,
+   STATIC and link-list patches: `omplConfig.cmake.in` hard-codes `find_dependency(Boost
+   REQUIRED COMPONENTS serialization filesystem system)` and breaks every consumer; the XXL
+   planner and `AdjacencyList` include `boost/thread`, which refuses to compile without
+   `-pthread`; and Boost.Serialization's archive templates reach the link from
+   `PlannerData.cpp` via `StateStorage.h` (one unused function, `extractStateStorage`), taking
+   the `*Storage` units and the Thunder/Lightning databases with them. Boost's headers are
+   copied into the Emscripten sysroot rather than found at `/usr/include`, because putting
+   `/usr/include` on the include path shadows the sysroot's libc headers; and jammy-era Boost
+   1.74 needs `-D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION`.
+4. **A traced multilevel run is not seed-reproducible.** Frame capture draws from the global
+   RNG and captures land on wall-clock boundaries, so `solveScene` installs no trace sink when
+   handed no callback, and the determinism check compares untraced runs. See the Track E card
+   in `ROADMAP.md`.
+5. **The budget slider defaults to 10 s, not 5 s**, and a blocked endpoint arrives as
+   `error.kind == "runtime"` with `"Invalid initial states."` from `BundleSpaceGraph::setup`
+   rather than as `status == "invalid_start"`; the page maps both to the same plain sentence.
+
 ## Context
 
 Build an Emscripten/wasm port of `mlmp` so a visitor on a static host (GitHub Pages, no

@@ -80,9 +80,14 @@ padded bounding box. Scene JSON angles are integer degrees, converted to radians
   lambda, on the planner thread.
 - **Seed before any OMPL object exists.** `ompl::RNG::setSeed` runs in `main` before `Scene`/`Solver`,
   because `KinematicChainProjector`'s constructor draws from the global RNG.
-- **Seed reproducibility covers path fields only.** Multilevel planners use the whole time budget, so
-  vertex, sample, and check counters follow host speed. `CountingStateSampler` forwards to the default
-  sampler so that counting doesn't change the RNG sequence.
+- **Seed reproducibility covers path fields only, and only for an untraced run.** Multilevel planners
+  use the whole time budget, so vertex, sample, and check counters follow host speed.
+  `CountingStateSampler` forwards to the default sampler so that counting doesn't change the RNG
+  sequence. Tracing does change it: `captureFrame` calls `BundleSpaceSequence::getPlannerData`, whose
+  path-restriction code draws from the global RNG, and captures land on wall-clock boundaries — so a
+  traced multilevel run consumes a host-speed-dependent number of draws and its `path_length_raw` is
+  not reproducible. Both determinism gates (`ci.yml`, `web/test/smoke.mjs`) therefore compare untraced
+  runs.
 - **Counters are plain `uint64_t` in `RunCounters`**, since everything is single-threaded. Every level's
   space and checker must be wired to the same `counters_` (use `makeChainSpace`). `solve()` resets
   counters and level handles so it can be called more than once.

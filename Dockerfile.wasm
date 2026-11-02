@@ -1,0 +1,159 @@
+# syntax=docker/dockerfile:1
+
+# Emscripten build of mlmp plus the static playground under web/. Mirrors the native
+# Dockerfile's conventions; every difference is forced by GitHub Pages serving no COOP/COEP
+# headers, so the module must be single-threaded and small:
+#   * OMPL is built STATIC, which is what lets the linker drop everything the playground never
+#     reaches (benchmarks, PlannerDataStorage, CForest, the planners we do not expose).
+#   * OMPL's Boost components and Threads::Threads are unlinked: only header-only Boost is
+#     reachable from mlmp, and a pthread build would need SharedArrayBuffer.
+#
+#   docker build -f Dockerfile.wasm --target dist --output type=local,dest=web/dist .
+# emsdk 6.0.13, not an older pin: Emscripten's 3.1.x ES6 glue opens with a static
+# `import { createRequire } from 'module'`, which no browser can resolve, and detects a worker
+# by `typeof importScripts`, which is undefined inside a *module* worker — so a 3.1.x
+# -sEXPORT_ES6 build cannot be loaded by `new Worker(url, { type: "module" })` at all.
+FROM emscripten/emsdk:6.0.13 AS builder
+ARG OMPL_VERSION=1.7.0
+ARG JSON_VERSION=v3.11.3
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libboost-dev libeigen3-dev git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Boost's headers go into the Emscripten sysroot rather than being found at /usr/include.
+# Putting /usr/include on the include path makes the host glibc headers shadow the sysroot's
+# (clang then fails on bits/libc-header-start.h), while a subdirectory such as
+# /usr/include/eigen3 is harmless — which is why Eigen is still found through /usr.
+RUN set -eu; \
+    sysroot="$(em-config CACHE)/sysroot"; \
+    test -d "$sysroot/include" || { echo "no Emscripten sysroot at $sysroot"; exit 1; }; \
+    test -f /usr/include/boost/version.hpp || { echo "boost headers not installed"; exit 1; }; \
+    cp -r /usr/include/boost "$sysroot/include/boost"; \
+    test -f "$sysroot/include/boost/version.hpp"
+
+# jammy (this image's base) ships nlohmann_json 3.10.5, below the 3.11 floor mlmp's
+# find_package asks for, so it is installed from source into the wasm prefix.
+RUN git clone --depth 1 -b "${JSON_VERSION}" https://github.com/nlohmann/json.git /src/json \
+ && emcmake cmake -S /src/json -B /src/json/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/wasm \
+        -DJSON_BuildTests=OFF \
+ && cmake --install /src/json/build \
+ && rm -rf /src/json
+
+RUN git clone --depth 1 -b "${OMPL_VERSION}" https://github.com/ompl/ompl.git /src/ompl
+
+# Six patches, each guarded by a grep that fails the build when the expected text is absent.
+# A silently missed patch compiles cleanly and yields either an 11 MB module or a pthread build,
+# so the guards are the proof. OMPL is not vendored here, hence fixed strings, never line numbers.
+# Patch 3 keeps Boost::headers: dropping it as well would take the include path with it.
+# Patch 4 is on the installed config: it hard-codes find_dependency on the same three Boost
+# components, so without it every consumer of the wasm OMPL fails to configure.
+# Patch 5 drops the only two sources that include boost/thread (the XXL planner and
+# AdjacencyList, used solely by XXL). Boost.Thread refuses to compile without -pthread, and
+# -pthread would mean SharedArrayBuffer; mlmp exposes neither of them. std::thread users such
+# as PRM still compile — entry.cpp rejects PRMStar at runtime instead.
+# Patch 6 does the same for Boost.Serialization, which has no header-only form: the archive
+# templates reach the link from PlannerData.cpp through StateStorage.h, used there by exactly
+# one function (extractStateStorage) that mlmp never calls. The *Storage translation units and
+# the Thunder/Lightning experience databases built on them go with it; nothing else in OMPL
+# references them.
+RUN set -eu; \
+    top=/src/ompl/CMakeLists.txt; \
+    lib=/src/ompl/src/ompl/CMakeLists.txt; \
+    cfg=/src/ompl/omplConfig.cmake.in; \
+    boost='find_package(Boost 1.68 REQUIRED COMPONENTS serialization filesystem system program_options)'; \
+    grep -qF "$boost" "$top" || { echo "patch 1: Boost COMPONENTS line absent from $top"; exit 1; }; \
+    sed -i "s|$boost|find_package(Boost 1.68 REQUIRED)|" "$top"; \
+    grep -qF 'find_package(Boost 1.68 REQUIRED)' "$top"; \
+    ! grep -qF 'COMPONENTS serialization' "$top"; \
+    grep -qF 'add_library(ompl SHARED' "$lib" || { echo "patch 2: SHARED library absent from $lib"; exit 1; }; \
+    sed -i 's|add_library(ompl SHARED|add_library(ompl STATIC|' "$lib"; \
+    ! grep -qF 'add_library(ompl SHARED' "$lib"; \
+    grep -qF 'Boost::filesystem' "$lib" || { echo "patch 3: Boost link targets absent from $lib"; exit 1; }; \
+    grep -qF 'Threads::Threads' "$lib" || { echo "patch 3: Threads link target absent from $lib"; exit 1; }; \
+    sed -i 's|Boost::filesystem|Boost::headers|' "$lib"; \
+    sed -i -E '/Boost::(serialization|system)/d' "$lib"; \
+    sed -i '/Threads::Threads/d' "$lib"; \
+    grep -qF 'Boost::headers' "$lib"; \
+    ! grep -qE 'Boost::(filesystem|serialization|system)|Threads::Threads' "$lib"; \
+    grep -qF 'Eigen3::Eigen' "$lib" || { echo "patch 3 over-deleted: Eigen3 link target gone"; exit 1; }; \
+    components='set(_@PROJECT_NAME@_boost_components serialization filesystem system)'; \
+    grep -qF "$components" "$cfg" || { echo "patch 4: boost component list absent from $cfg"; exit 1; }; \
+    sed -i "s|$components|set(_@PROJECT_NAME@_boost_components)|" "$cfg"; \
+    sed -i 's|find_dependency(Boost REQUIRED COMPONENTS ${_@PROJECT_NAME@_boost_components})|find_dependency(Boost REQUIRED)|' "$cfg"; \
+    ! grep -qF 'COMPONENTS ${_@PROJECT_NAME@_boost_components}' "$cfg"; \
+    xxl=/src/ompl/src/ompl/geometric/planners/xxl; \
+    adj=/src/ompl/src/ompl/datastructures; \
+    test -d "$xxl" || { echo "patch 5: xxl planner directory absent"; exit 1; }; \
+    test -f "$adj/src/AdjacencyList.cpp" || { echo "patch 5: AdjacencyList absent"; exit 1; }; \
+    rm -rf "$xxl" "$adj/AdjacencyList.h" "$adj/src/AdjacencyList.cpp"; \
+    ! grep -rq 'boost/thread' /src/ompl/src/ompl; \
+    base=/src/ompl/src/ompl; \
+    pd=$base/base/src/PlannerData.cpp; \
+    grep -q 'extractStateStorage' "$pd" || { echo "patch 6: extractStateStorage absent from $pd"; exit 1; }; \
+    sed -i '\|#include "ompl/base/StateStorage.h"|d' "$pd"; \
+    awk 'BEGIN{skip=0} /^ompl::base::StateStoragePtr ompl::base::PlannerData::extractStateStorage\(\) const/{skip=1} skip==0{print} skip==1 && /^}/{skip=0}' "$pd" > "$pd.new"; \
+    mv "$pd.new" "$pd"; \
+    ! grep -q 'StateStorage' "$pd"; \
+    rm -rf "$base/tools/thunder" "$base/tools/lightning" "$base/geometric/planners/experience" \
+           "$base/base/src/StateStorage.cpp" "$base/base/src/PlannerDataStorage.cpp" \
+           "$base/control/src/PlannerDataStorage.cpp"; \
+    ! grep -rq 'boost/archive' --include=*.cpp "$base"
+
+# CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH plus /usr lets Eigen3's architecture-independent CMake
+# config be found through the Emscripten toolchain, which otherwise confines find_package to its
+# own sysroot and replaces the system prefix list with "/". The INCLUDE mode is deliberately left
+# at the toolchain's ONLY, so headers resolve inside the sysroot.
+#
+# _LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION: jammy's Boost 1.74 still derives from
+# std::unary_function, which libc++ removed in C++17 (boost/container_hash/hash.hpp fails to
+# compile without it). mlmp's Emscripten branch sets the same define, because OMPL's
+# PlannerDataGraph.h pulls boost/graph into every consumer.
+RUN emcmake cmake -S /src/ompl -B /src/ompl/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/wasm \
+        -DOMPL_BUILD_TESTS=OFF \
+        -DOMPL_BUILD_DEMOS=OFF \
+        -DOMPL_BUILD_PYBINDINGS=OFF \
+        -DOMPL_REGISTRATION=OFF \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+        -DCMAKE_PREFIX_PATH=/usr \
+        -DCMAKE_CXX_FLAGS="-O3 -fwasm-exceptions -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION" \
+ && cmake --build /src/ompl/build --target ompl -j"$(nproc)" \
+ && cmake --install /src/ompl/build \
+ && rm -rf /src/ompl/build /src/ompl/.git
+
+COPY mlmp /src/mlmp
+COPY web /src/web
+# Only to prove docs/renderer.js has not drifted from web/src/renderer.js; the page uses the
+# latter. The two copies exist because docs/ must stay servable straight from the branch.
+COPY docs/renderer.js /src/docs-renderer.js
+
+RUN emcmake cmake -S /src/mlmp -B /src/mlmp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+        -DCMAKE_PREFIX_PATH="/opt/wasm;/usr" \
+ && cmake --build /src/mlmp/build -j"$(nproc)"
+
+# /out mirrors the source tree's relative layout, so every module specifier that resolves in
+# web/ also resolves in dist: worker.js imports ./mlmp.mjs, and Emscripten finds mlmp.wasm
+# beside it with no locateFile override.
+RUN set -eu; \
+    cmp /src/web/src/renderer.js /src/docs-renderer.js; \
+    mkdir -p /out/src /out/scenes; \
+    cp /src/web/index.html /out/index.html; \
+    cp /src/web/src/main.js /src/web/src/worker.js /src/web/src/editor.js \
+       /src/web/src/app.css /src/web/src/renderer.js /out/src/; \
+    cp /src/mlmp/build/mlmp.mjs /src/mlmp/build/mlmp.wasm /out/src/; \
+    cp /src/mlmp/src/inputs/experiment/scene*.json /out/scenes/; \
+    python3 -c "import json, os; d = '/out/scenes'; \
+print(json.dumps(sorted(f for f in os.listdir(d) \
+if f.endswith('.json') and f != 'index.json')))" \
+       > /out/scenes/index.json
+# The redirection creates index.json before python lists the directory, hence the self-exclusion
+# above; the list is generated rather than hardcoded so a seventh scene cannot be left out.
+
+FROM scratch AS dist
+COPY --from=builder /out /
