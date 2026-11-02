@@ -54,7 +54,12 @@ The data already exists in `BiQRRTImpl::getPlannerData`.
   frame where the two trees connect and the path collapses out.
 - Side-by-side with QRRT on the same scene and seed — the bidirectional advantage becomes
   something you can see rather than something a table asserts.
-- 10-second looping GIF at the top of the README. Interactive version (web) optional.
+- 10-second looping GIF at the top of the README.
+- **A trace player**, which is the GIF with a scrubber. The per-iteration dump above is the
+  whole input: a static page replays it, steps frame by frame, toggles bundle levels, and runs
+  BiQRRT and QRRT side by side on the same seed. No solver in the browser, so it is a few
+  hundred KB of JSON on GitHub Pages with no toolchain and no hosting requirements. Running the
+  planner live in the browser is Phase 6 and costs vastly more; do not conflate them.
 
 Multilevel planning is genuinely beautiful and almost nobody renders the bundle hierarchy.
 
@@ -179,6 +184,42 @@ produces an unfalsifiable ML claim.
 - Render in MuJoCo or Drake.
 
 Same algorithms, different perceived seriousness.
+
+---
+
+## Phase 6 — Run the planner in the browser
+
+The Phase 1 trace player replays a run that was computed elsewhere. This phase lets a visitor
+drag an obstacle and watch the hierarchy re-solve — the one capability a replay cannot fake, and
+the reason to pay for it.
+
+The dependency surface is already small enough to try. `ldd` on the shipped binary lists exactly
+three non-system libraries — `libompl`, `libboost_filesystem`, `libboost_serialization` — plus
+`libboost_program_options`; there is no CGAL, no X11, no OpenGL and no GPU. Four obstacles, in
+the order they bite:
+
+- **`solve(double)` spawns a thread.** `Planner.cpp:142-144` routes any budget `>= 1.0` s to the
+  `std::thread`-backed `PlannerThreadedTerminationCondition`. Emscripten pthreads need
+  `SharedArrayBuffer`, which needs COOP/COEP response headers, which **GitHub Pages cannot
+  set**. Fix on our side instead: call `solve(const PlannerTerminationCondition &)` with a
+  non-threaded condition, which is a handful of lines in `Solver::solve` and keeps the build
+  single-threaded.
+- **Boost has no Emscripten port.** `libompl` links Boost.Filesystem and Boost.Serialization
+  itself; only `PlannerDataStorage` and `Benchmark` use them and we call neither, so either
+  cross-compile both for wasm or trim them out of the OMPL build.
+- **Payload.** `libompl.so.1.7.0` is 11.3 MB native. Dead-code elimination against the handful
+  of planners actually registered should cut that hard, but budget for megabytes, and measure
+  the compressed transfer rather than guessing.
+- **A blocking solve freezes the tab.** The planner occupies its whole budget by design, so it
+  belongs in a Web Worker. That is orthogonal to pthreads and needs no special headers.
+
+`Scene::loadScene` takes a filename and an `ifstream`, which the Emscripten virtual filesystem
+satisfies unchanged, so the scene editor can write a file and reuse the existing loader rather
+than growing a second parse path. `boost::program_options` is dead weight in this build; the
+entry point becomes an embind function, not `main`.
+
+**Done when:** a visitor edits a scene in the browser, picks a planner, and sees the trees grow
+without a server, on a static host that sets no special headers.
 
 ---
 
