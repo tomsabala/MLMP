@@ -48,8 +48,41 @@ jobs:
           set -eu
           docker run --rm mlmp:ci --algo BiQRRT --input-file "$SOLVE_SCENE" --time-limit 10
 
+      - name: JSON contract and determinism
+        run: |
+          set -eu
+          a=$(docker run --rm mlmp:ci --algo BiQRRT --input-file "$SOLVE_SCENE" --time-limit 10 --seed 42)
+          b=$(docker run --rm mlmp:ci --algo BiQRRT --input-file "$SOLVE_SCENE" --time-limit 10 --seed 42)
+          echo "$a" | python3 -c '
+          import json,sys
+          r=json.load(sys.stdin)
+          assert r["schema"]=="mlmp.run/1", r.get("schema")
+          assert r["solved"] is True and r["exact"] is True, r["status"]
+          assert r["seed"]==42, r["seed"]
+          assert r["path_length_raw"]>0, r["path_length_raw"]
+          assert r["path_length_simplified"]>0, r["path_length_simplified"]
+          assert r["state_validity_checks"]>0, "validity checks never counted"
+          assert r["states_sampled"]>0, "samples never counted"
+          assert r["time_first_solution_s"] is not None, "no first-solution time"
+          assert r["trace"] is None, r["trace"]
+          '
+          # Only seed-determined fields are compared. Iteration counters deliberately are
+          # not: the multilevel planners consume the whole --time-limit, so vertex, sample
+          # and check counts track runner speed rather than the seed.
+          for k in path_length_raw path_length_simplified; do
+            x=$(echo "$a" | python3 -c "import json,sys;print(json.load(sys.stdin)['$k'])")
+            y=$(echo "$b" | python3 -c "import json,sys;print(json.load(sys.stdin)['$k'])")
+            test "$x" = "$y" || { echo "non-deterministic $k: $x vs $y"; exit 1; }
+          done
+
       - name: Bad input exits 2
         run: |
           set -u
-          docker run --rm mlmp:ci --input-file does-not-exist.json && code=0 || code=$?
+          out=$(docker run --rm mlmp:ci --input-file does-not-exist.json) && code=0 || code=$?
           test "$code" -eq 2 || { echo "expected exit 2, got $code"; exit 1; }
+          echo "$out" | python3 -c '
+          import json,sys
+          r=json.load(sys.stdin)
+          assert r["schema"]=="mlmp.run/1", r.get("schema")
+          assert r["error"]["kind"]=="io", r["error"]
+          '

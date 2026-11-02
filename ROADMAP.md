@@ -44,6 +44,179 @@ docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.
 
 ---
 
+## Track gate — the `Solver` contract
+
+Phase 0 left one file in the way of everything else: four of the six tracks below want
+incompatible edits to the same 45 lines of `mlmp/src/models/solver.h`. The gate lands
+first, alone, and fixes the contract the tracks code against. Renaming a field after this
+point is a cross-track break.
+
+- `Solver::solve(const RunOptions&) -> RunResult`. No printing, no `boost::program_options`,
+  no file IO inside the solver: `main.cpp` owns the CLI and the output stream, so an
+  Emscripten entry point can call the same function.
+- **Non-threaded termination.** The budget is a `PlannerTerminationCondition` built from a
+  `std::function` polling `steady_clock`, never `ss.solve(double)`, which routes any budget
+  ≥ 1 s to a `std::thread` (`Planner.cpp:142-144`) that Emscripten cannot have without
+  COOP/COEP headers GitHub Pages will not set.
+- **One JSON object on stdout**, logs on stderr (OMPL's default handler writes INFO/DEBUG to
+  stdout and would corrupt it). Exit codes unchanged: 0 solved, 1 no solution in budget,
+  2 usage or IO error.
+- **`--seed`**, applied via `ompl::RNG::setSeed` before any RNG exists, and echoed back in
+  the result whether it was given or generated.
+- **Raw and simplified path length as separate fields**; `--no-simplify` skips the
+  simplifier. Reporting only the simplified length measured the simplifier as much as the
+  planner — and measurably misreported it: under `KinematicChainSpace`'s custom non-Euclidean
+  `distance()`, `simplifyMax` can return a *longer* summed length than the raw path
+  (`scene1`, seed 7: raw 8.81, simplified 10.84), because B-spline smoothing inserts states
+  and this metric is not additive along interpolation. `path_length_raw >= path_length_simplified`
+  is therefore not an invariant and must not be asserted.
+- **`time_first_solution_s` for every planner**, by polling `hasExactSolution()` in the
+  termination condition. The intermediate-solution callback only fires for optimizing
+  planners, and since 1.7.0 the multilevel planners report the whole budget as `Runtime`.
+- **A trace hook.** `RunOptions::traceSink` gets one JSON frame per interval, captured
+  inside the termination-condition poll — the planner's own thread, between iterations —
+  so no locking and no half-mutated graph.
+- **Counters that survive the hierarchy**: validity checks and samples are counted on
+  *every* bundle level, not only the top space.
+- Two latent defects fixed on the way: the file-scope `std::vector<Environment> envs` grew
+  by `n` copies per `solve()` and handed out `&envs.at(...)` pointers that dangle after the
+  next push_back, so a second solve in one process was unsafe — which Tracks B and E both
+  need; and all levels shared identical obstacle copies anyway, so one `Environment` member
+  replaces the vector.
+
+### `mlmp.run/1` — stdout, one object
+
+`schema`, `planner`, `scene`, `scene_path`, `robots`, `links`, `seed`, `time_limit_s`,
+`ompl_version`, `solved`, `exact`, `status`, `time_solve_s`, `time_first_solution_s`,
+`time_simplify_s`, `solution_events[{t_s,cost}]`, `path_length_raw`,
+`path_length_simplified`, `path_states`, `path`, `graph_vertices`, `graph_edges`,
+`state_validity_checks`, `states_sampled`, `motion_checks`, `motion_checks_valid`,
+`trace{file,frames,truncated,errors}`.
+
+`status` is one of `unknown`, `invalid_start`, `invalid_goal`, `unrecognized_goal_type`,
+`timeout`, `approximate_solution`, `exact_solution`, `crash`, `abort`, `infeasible`.
+`solved` is true for approximate solutions too; `exact` is the field that separates them.
+Failures emit `{"schema":"mlmp.run/1","error":{"kind":"usage"|"io"|"runtime","message":…}}`
+and exit 2. No stdout at all means the process crashed — the fourth failure mode §2.2 asks
+for.
+
+**What is reproducible under a fixed seed, and what is not.** The multilevel planners consume
+the entire `--time-limit` (`time_solve_s` is 10.001 for `--time-limit 10`), so iteration-count
+fields — `graph_vertices`, `graph_edges`, `state_validity_checks`, `states_sampled`,
+`motion_checks` — track host speed, not the seed, and vary by a few percent between identical
+invocations. The *solution* is seed-determined: `path_length_raw` and `path_length_simplified`
+reproduce exactly across runs and across budgets (`scene1`, seed 42: raw 6.199084573 at both
+`--time-limit 3` and `10`; seeds 7 and 99 give different lengths). A harness comparing runs
+must compare the path fields, not the counters.
+
+### `mlmp.trace/1` — `--trace-file`, JSONL
+
+Line 1 is a header (`schema`, `planner`, `scene`, `seed`, `robots`, `links`,
+`time_limit_s`, `interval_ms`); every later line is a frame:
+
+```json
+{"frame":7,"t_s":0.35,"vertices":[{"level":0,"component":0,"start":true,"goal":false,"q":[0.1,-0.4]}],"edges":[[0,1]]}
+```
+
+Every vertex carries a full-dimension state: `BundleSpaceSequence::getPlannerData` lifts
+each level's states into the total space and tags them with `setLevel`. `--trace-interval-ms`
+(default 50) and `--trace-max-frames` (default 400) bound the output; hitting the cap sets
+`trace.truncated`. Measured on `scene1`/BiQRRT at a 10 s budget: 197 frames spanning levels
+0–3, every `q` of full dimension 8, `trace.errors` 0.
+
+---
+
+## Parallel tracks
+
+Six tracks, concurrent after the gate. Each entry states what it owns, what it may not
+touch, and what makes it done.
+
+### Track A — Trace player and GIF (Phase 1)
+
+- **Scope.** Consume `mlmp.trace/1`: 10-second looping GIF for the README, and a static
+  scrubber page that steps frames, toggles bundle levels, and runs BiQRRT beside QRRT on the
+  same seed. Extend `BiQRRTImpl::getPlannerData` to tag start-tree versus goal-tree
+  membership — today it only chains to the base and logs the two tree sizes, and the generic
+  `component` field does not separate them.
+- **Requires.** The gate. Nothing else.
+- **Constraints.** No solver in the browser — that is Track E, and conflating them costs
+  megabytes. Static JSON on GitHub Pages, no toolchain, no hosting. A traced run is never a
+  timing run: frame capture copies the whole graph. The QRRT side-by-side stays unconvincing
+  until Track F lands, since QRRT solved no scene 3/3 at a 10 s budget.
+- **Done when.** The GIF is in the README and the player replays both planners from committed
+  trace files.
+
+### Track B — Experiment harness (§2.1–2.4)
+
+- **Scope.** New `mlmp/tools/experiment.py`: one planner per process, serialized, pinned with
+  `taskset`, host specs recorded, reading `mlmp.run/1` from stdout instead of regex. n ≥ 50
+  per cell, bootstrap 95% CIs, the four failure modes kept distinct (exit 1 = no solution,
+  exit 2 + `error.kind`, other exit = crash, unparseable stdout = parse error). Both time
+  metrics from §2.4, which the gate already emits.
+- **Requires.** The gate. Track F before the full campaign.
+- **Constraints.** Never two timed planners at once — that is the defect that invalidated the
+  old numbers. Never report a run that used `--trace-file`. Never resurrect `results.json`.
+  Running the campaign before Track F's `maxDistance_` parameter confounds the BiQRRT/QRRT
+  gap with a hardcoded step size and buys a rerun. Reproducibility is asserted on the path
+  fields, not the iteration counters — see the gate's note on what a fixed seed does and does
+  not pin down.
+- **Done when.** `python3 mlmp/tools/experiment.py --seed 42` twice produces identical tables
+  and CI regenerates a small subset on every push.
+
+### Track C — Procedural scenes (§2.6)
+
+- **Scope.** Scene generator with a computed difficulty metric (narrow-passage width, C-space
+  obstacle ratio, chain DOF, inter-robot coupling, start/goal homotopy distance); 500+ scenes
+  from a seed; the six originals kept as named regression scenes.
+- **Requires.** Nothing. The scene JSON schema is untouched by the gate.
+- **Constraints.** Shares the scene schema with Track D: any schema change is agreed with
+  Track D first and both land together. Scenes are generated from a seed, never committed as
+  blobs.
+- **Done when.** The generator produces a scene set spanning the difficulty range from a seed,
+  and `Scene::loadScene` reads it unmodified.
+
+### Track D — URDF and 3D (Phase 5)
+
+- **Scope.** URDF loading, Panda or UR5, 3D chains, heterogeneous teams, more than two agents,
+  MuJoCo or Drake rendering.
+- **Requires.** Nothing. The gate's `Solver::makeChainSpace`/`buildSetup` split is the seam:
+  one place constructs the state space.
+- **Constraints.** Scene-schema coordination with Track C. The existing planar scenes must
+  keep producing identical results — they are the regression set. The collision checker stays
+  as it is unless profiling names it (see Non-goals).
+- **Done when.** A URDF-described arm plans and renders through the same CLI contract.
+
+### Track E — Run the planner in the browser (Phase 6)
+
+- **Scope.** Emscripten build, Web Worker, in-page scene editor; drag an obstacle and watch
+  the hierarchy re-solve.
+- **Requires.** The gate (non-threaded termination, no `program_options` inside `Solver`).
+- **Constraints.** Single-threaded; no COOP/COEP headers available. Boost.Filesystem and
+  Boost.Serialization must be cross-compiled or trimmed out of the OMPL build. Measure the
+  compressed payload, do not estimate. Replay is Track A's and must not be rebuilt here.
+- **Done when.** A visitor edits a scene, picks a planner, and sees the trees grow, on a
+  static host that sets no special headers.
+
+### Track F — Planner hygiene (§2.5)
+
+- **Scope.** Make `maxDistance_` a declared `Planner::declareParam` with a `SelfConfig`-derived
+  default instead of the hardcoded `0.1` at `BiQRRTImpl.cpp:29`, and answer whether the
+  BiQRRT/QRRT gap is real or a step-size artefact (QRRT's `SelfConfig` default logged as
+  1.78–3.55 across `scene1`'s levels).
+- **Requires.** The gate. The raw-versus-simplified half of §2.5 is already delivered by it.
+- **Constraints.** Must land before Track B's campaign. The new default changes BiQRRT
+  behaviour, so re-measure the CI solve gate (`scene1`, 3/3 at 10 s) before merging.
+- **Done when.** The step size is a parameter with a scale-derived default and the gap has a
+  measured explanation.
+
+### What cannot be parallelised
+
+The gate precedes A, B, E and F. Track F precedes Track B's full campaign. The campaign
+precedes Phase 3, and Phase 3 precedes Phase 4 — learned sampling without rigorous baselines
+is an unfalsifiable claim, which is the whole reason Phase 2 exists.
+
+---
+
 ## Phase 1 — Visualize the bundle hierarchy
 
 The data already exists in `BiQRRTImpl::getPlannerData`.
@@ -70,7 +243,10 @@ Multilevel planning is genuinely beautiful and almost nobody renders the bundle 
 **The current results are not merely old. They are invalid.** This must be fixed before
 any new claim is made, because every downstream phase depends on trustworthy baselines.
 
-### 2.1 What is wrong with `tools/experiment.py`
+### 2.1 What was wrong with `mlmp/tools/experiment.py`
+
+The gate deleted this script, `plotResults.py` and `results.json`; the table is the
+acceptance list for the replacement, not a description of live code.
 
 | Defect | Evidence |
 |---|---|
@@ -85,19 +261,21 @@ any new claim is made, because every downstream phase depends on trustworthy bas
 
 - **One planner per process, serialized.** No concurrency during a timed run. Pin to a CPU
   (`taskset`), disable turbo/boost drift where possible, record host specs in the output.
-- **Structured output.** The C++ binary emits JSON (`{planner, scene, seed, solved,
-  time_s, path_length, states_sampled, collision_checks}`) — no stdout regex.
-- **Seeded and reproducible.** `--seed` through to `ompl::RNG::setSeed`. The same seed set
-  must reproduce the same table.
+- **Structured output.** Delivered by the gate: the binary emits `mlmp.run/1` on stdout, no
+  regex.
+- **Seeded and reproducible.** Delivered by the gate: `--seed` reaches `ompl::RNG::setSeed`
+  before any RNG exists, and the seed is echoed back whether given or generated. Note what a
+  seed pins down — the solution path, not the iteration counters; see the Track gate.
 - **n ≥ 50 per cell**, bootstrap 95% confidence intervals on every reported statistic.
 - **Distinguish failure modes.** Timeout, no-solution-found, crash, and parse error are
   four different outcomes, not one `None`.
 - Consider `ompl::tools::Benchmark` + the Planner Arena log format instead of hand-rolling
   — it gives the statistical machinery and a known output format for free.
 - Delete `tools/results.json` and regenerate it. Do not carry invalid numbers forward.
+  Delivered by the gate: the file is gone.
 
-**Done when:** `python3 tools/experiment.py --seed 42` twice produces identical tables, and
-CI regenerates a small subset on every push.
+**Done when:** `python3 mlmp/tools/experiment.py --seed 42` twice produces identical tables,
+and CI regenerates a small subset on every push.
 
 ### 2.3 Planner set
 
@@ -134,8 +312,9 @@ Two measurements from Phase 0 make this concrete, both from 3 repetitions per ce
 - `BiQRRTImpl::setup()` hardcodes `maxDistance_ = 0.1`; make it a declared parameter
   (`Planner::declareParam`) with a `SelfConfig`-derived default, since the magic number is tied
   to the current scene scale.
-- `Solver::solve` runs `simplifyMax` on every solution before reporting length, which measures
-  the simplifier as much as the planner — report raw and simplified length separately.
+- `Solver::solve` ran `simplifyMax` on every solution before reporting length, which measured
+  the simplifier as much as the planner. **Delivered by the gate:** `path_length_raw` and
+  `path_length_simplified` are separate fields and `--no-simplify` skips the simplifier.
 
 ### 2.6 Scale the scene set
 
