@@ -144,29 +144,7 @@ scope forced by hand-authoring. It no longer is.
 
 ---
 
-## Phase 3 — Use CGEO as the geometry backend
-
-`mlmp/src/state/kinematic_chain.h:243` is a Stack Overflow–cited segment intersection on raw
-doubles, sitting in `isValidImpl` — the hottest loop in the planner.
-`mlmp/src/common/geometry.h` is two structs of naked doubles with a `print()` method.
-
-CGEO is a C++ segment-intersection kernel with a sweep line and a balanced status tree.
-Link them:
-
-- CGEO exposes a C++ consumer API (headers + static lib, not only the Python extension).
-- MLMP's collision checker calls it; exact predicates replace epsilon comparisons in the
-  validity check, which is where degeneracy actually bites a planner.
-- Broad-phase via CGEO's BVH instead of all-pairs segment tests.
-- Benchmark before/after — this is a measurable claim, not a refactor.
-
-The payoff is mutual: the planner is the demanding real-time consumer that makes the
-kernel's API good, and planner benchmark regressions become kernel test cases.
-
-See `CGEO/ROADMAP.md` Phase 5.
-
----
-
-## Phase 4 — The finding
+## Phase 3 — The finding
 
 A benchmark that only produces plots is a plot dump. State a rule and a mechanism:
 
@@ -181,9 +159,9 @@ of the difference between a project with zero stars and one people cite.
 
 ---
 
-## Phase 5 — Learned sampling
+## Phase 4 — Learned sampling
 
-Only after Phase 2 and 4. Rigorous baselines are what make this credible; doing it first
+Only after Phase 2 and 3. Rigorous baselines are what make this credible; doing it first
 produces an unfalsifiable ML claim.
 
 - Train a sampler on solved instances to predict promising bundle-space restrictions.
@@ -192,7 +170,7 @@ produces an unfalsifiable ML claim.
 
 ---
 
-## Phase 6 — Make it look like a robot
+## Phase 5 — Make it look like a robot
 
 4-joint planar chains in a unit square read as a toy regardless of the algorithm's quality.
 
@@ -206,9 +184,15 @@ Same algorithms, different perceived seriousness.
 
 ## Non-goals
 
-- LLM features. This is a planning and geometry problem.
+- LLM features. This is a planning problem.
 - Reimplementing OMPL. Extend it.
 - Upstreaming BiQRRT into `ompl::multilevel`. The repo is the artifact; a maintainer review
   cycle is not a goal of this project.
+- Integrating CGEO, or writing a geometry kernel for this project. The collision checker in
+  `mlmp/src/state/kinematic_chain.h:243` is a Stack Overflow–cited segment intersection on raw
+  doubles sitting in `isValidImpl`, the hottest loop in the planner, and
+  `mlmp/src/common/geometry.h` is two structs of naked doubles. If that ever shows up as a
+  measured bottleneck, the answer is an established computational-geometry library, not a
+  personal one — there are better maintained kernels than anything written here.
 - Carrying `tools/results.json` forward. Those numbers were produced under thread
   contention by a script that cannot regenerate them.
