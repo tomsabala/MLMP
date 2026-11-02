@@ -9,6 +9,7 @@
 
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 
+#include "common/counters.h"
 #include "common/geometry.h"
 
 using Environment = std::vector<mlmp::common::Segment>;
@@ -152,14 +153,17 @@ public:
     KinematicChainValidityChecker(const ompl::base::SpaceInformationPtr& si,
                                    std::vector<mlmp::common::Point> pinnedPositions,
                                    unsigned int numRobots,
-                                   unsigned int numLinks)
+                                   unsigned int numLinks,
+                                   mlmp::RunCounters& counters)
         : ompl::base::StateValidityChecker(si)
         , pinnedPositions_(std::move(pinnedPositions))
         , numRobots_(numRobots)
-        , numLinks_(numLinks) {
+        , numLinks_(numLinks)
+        , counters_(&counters) {
     }
 
     bool isValid(const ompl::base::State* state) const override {
+        ++counters_->stateValidityChecks;
         const auto* space = si_->getStateSpace()->as<KinematicChainSpace>();
         const auto* s = state->as<KinematicChainSpace::StateType>();
         return isValidImpl(space, s);
@@ -279,6 +283,9 @@ protected:
     std::vector<mlmp::common::Point> pinnedPositions_;
     unsigned int numRobots_;
     unsigned int numLinks_;
+    /* Pointer, not reference: isValid is const and the tally is not part of the
+     * checker's observable state, so RunCounters stays a plain mutable-free struct. */
+    mlmp::RunCounters* counters_;
 };
 
 #endif
