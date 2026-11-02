@@ -4,6 +4,11 @@
 docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
 ```
 
+The GHCR package is currently **private**, so that pull needs
+`docker login ghcr.io` with a token carrying `read:packages`. Until it is made public, build
+locally instead — `docker build -t mlmp:dev .`, then substitute `mlmp:dev` for the image name in
+every command below.
+
 A 2D multi-robot kinematic-chain motion-planning experiment built on OMPL's
 [`ompl::multilevel`](https://ompl.kavrakilab.org/multiLevelPlanning.html) bundle-space planners,
 plus a custom bidirectional bundle-space planner, `BiQRRT`.
