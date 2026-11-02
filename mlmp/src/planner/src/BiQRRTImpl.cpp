@@ -20,13 +20,23 @@ ompl::multilevel::BiQRRTImpl::BiQRRTImpl(const base::SpaceInformationPtr &si, Bu
 
 ompl::multilevel::BiQRRTImpl::~BiQRRTImpl(){}
 
+void BiQRRTImpl::setRange(double distance)
+{
+    BaseT::setRange(distance);
+    rangeSetExplicitly_ = true;
+}
+
 void BiQRRTImpl::setup()
 {
 
     OMPL_INFORM("setup start");
     BaseT::setup();
 
-    maxDistance_ = 0.1;
+    /* Planar default, kept bit-exact: Track F owns replacing it with a scale-derived
+     * value, which requires re-measuring the CI solve gate. A caller that set a range
+     * explicitly (a URDF run does) must not have it clobbered here. */
+    if (!rangeSetExplicitly_)
+        maxDistance_ = 0.1;
 
     if (!treeStart_)
     {

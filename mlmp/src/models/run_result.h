@@ -42,6 +42,12 @@ struct RunResult {
     std::string scenePath;
     int robots = 0;
     int links = 0;
+    /* "planar" | "urdf". robots/links keep their planar meanings; for a URDF scene
+     * robots is 1 and links is the actuated joint count, so dof == links there. */
+    std::string model = "planar";
+    int dof = 0;
+    std::optional<std::string> robotModel;     // URDF <robot name>, null for planar
+    std::optional<std::string> robotUrdf;      // resolved URDF path, null for planar
     std::uint_fast32_t seed = 0;
     double timeLimitS = 0.0;
 
@@ -91,6 +97,9 @@ namespace detail {
 inline Json optionalToJson(const std::optional<double>& v) {
     return v ? Json(*v) : Json(nullptr);
 }
+inline Json optionalToJson(const std::optional<std::string>& v) {
+    return v ? Json(*v) : Json(nullptr);
+}
 }
 
 /* The mlmp.run/1 wire format. Consumers index by key; the order below is for humans
@@ -116,6 +125,10 @@ inline Json toJson(const RunResult& r) {
         {"scene_path", r.scenePath},
         {"robots", r.robots},
         {"links", r.links},
+        {"model", r.model},
+        {"dof", r.dof},
+        {"robot_model", detail::optionalToJson(r.robotModel)},
+        {"robot_urdf", detail::optionalToJson(r.robotUrdf)},
         {"seed", static_cast<std::uint64_t>(r.seed)},
         {"time_limit_s", r.timeLimitS},
         {"ompl_version", OMPL_VERSION},

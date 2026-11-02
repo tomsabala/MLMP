@@ -19,8 +19,15 @@ RUN git clone --depth 1 -b "${OMPL_VERSION}" https://github.com/ompl/ompl.git /s
  && DESTDIR=/stage cmake --install /src/ompl/build \
  && rm -rf /src/ompl/build /src/ompl/.git
 
+# Separate layer from the OMPL build above on purpose: adding a package here must not
+# invalidate the cached OMPL source build, which is the expensive step.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        liburdfdom-dev libfcl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG MLMP_CMAKE_ARGS=""
 COPY mlmp /src/mlmp
-RUN cmake -S /src/mlmp -B /src/mlmp/build -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -S /src/mlmp -B /src/mlmp/build -DCMAKE_BUILD_TYPE=Release ${MLMP_CMAKE_ARGS} \
  && cmake --build /src/mlmp/build -j"$(nproc)"
 
 FROM ubuntu:24.04 AS runtime
@@ -28,11 +35,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libboost-serialization1.83.0 libboost-filesystem1.83.0 \
         libboost-program-options1.83.0 \
+        liburdfdom-model4.0 libfcl0.7 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /stage/usr/local/lib/ /usr/local/lib/
 COPY --from=builder /src/mlmp/build/mlmp /usr/local/bin/mlmp
 COPY --from=builder /src/mlmp/src/inputs/experiment/ /opt/mlmp/scenes/
 COPY --from=builder /src/mlmp/src/inputs/*.json /opt/mlmp/scenes/dev/
+# Scene files reference their URDF relatively ("robots/ur5.urdf"), resolved against the
+# scene directory first and MLMP_SCENE_DIR second; this copy satisfies both in the image.
+COPY --from=builder /src/mlmp/src/inputs/robots/ /opt/mlmp/scenes/robots/
 RUN ldconfig
 ENV MLMP_SCENE_DIR=/opt/mlmp/scenes
 ENTRYPOINT ["/usr/local/bin/mlmp"]

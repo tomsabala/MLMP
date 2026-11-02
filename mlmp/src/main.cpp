@@ -10,6 +10,7 @@
 #include <ompl/util/Console.h>
 #include <ompl/util/RandomNumbers.h>
 
+#include <common/build_config.h>
 #include <models/run_result.h>
 #include <models/scene.h>
 #include <models/solver.h>
@@ -143,8 +144,19 @@ int main(int argc, char* argv[]) {
     try {
         scenePath = resolveScenePath(cli.inputFile);
         scene.loadScene(scenePath);
+#ifdef MLMP_ENABLE_URDF
+    } catch (const mlmp::UnsupportedUrdf& e) {
+        /* A URDF this build cannot plan over is the user's choice of asset, not an IO
+         * failure; it must be distinguishable from a missing file. */
+        return emitError("usage", e.what());
+#endif
     } catch (const std::exception& e) {
         return emitError("io", e.what());
+    }
+
+    if (scene.getModel() == mlmp::RobotModel::Urdf && !mlmp::kUrdfSupported) {
+        return emitError("usage", "scene requires URDF support; this binary was built with "
+                                  "MLMP_ENABLE_URDF=OFF");
     }
 
     mlmp::RunOptions options;
@@ -164,12 +176,26 @@ int main(int argc, char* argv[]) {
         }
         options.traceFile = cli.traceFile;
 
+        const bool isUrdf = scene.getModel() == mlmp::RobotModel::Urdf;
+#ifdef MLMP_ENABLE_URDF
+        const mlmp::Json robotModel =
+            isUrdf ? mlmp::Json(scene.getUrdfRobot()->name) : mlmp::Json(nullptr);
+#else
+        const mlmp::Json robotModel = mlmp::Json(nullptr);
+#endif
+        const mlmp::Json robotUrdf =
+            isUrdf ? mlmp::Json(scene.getUrdfPath()) : mlmp::Json(nullptr);
+
         const mlmp::Json header = {{"schema", "mlmp.trace/1"},
                                    {"planner", cli.algo},
                                    {"scene", cli.inputFile},
                                    {"seed", static_cast<std::uint64_t>(seedInUse)},
                                    {"robots", scene.getR()},
                                    {"links", scene.getN()},
+                                   {"model", isUrdf ? "urdf" : "planar"},
+                                   {"dof", scene.getDof()},
+                                   {"robot_model", robotModel},
+                                   {"robot_urdf", robotUrdf},
                                    {"time_limit_s", cli.timeLimit},
                                    {"interval_ms", cli.traceIntervalMs}};
         traceOut << header.dump() << "\n";

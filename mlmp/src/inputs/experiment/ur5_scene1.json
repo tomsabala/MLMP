@@ -1,0 +1,17 @@
+{
+  "metadata": { "model": "urdf", "r": 1 },
+  "robots": [
+    {
+      "id": 1,
+      "urdf": "robots/ur5.urdf",
+      "basePose": { "xyz": [0, 0, 0], "rpy": [0, 0, 0] },
+      "startAngles": [0.0, -1.5707963, 1.5707963, 0.0, 1.5707963, 0.0],
+      "goalAngles": [2.0943951, -1.5707963, 1.5707963, 0.0, 1.5707963, 0.0],
+      "disableCollisions": []
+    }
+  ],
+  "obstacles3d": [
+    { "type": "box", "size": [1.6, 1.6, 0.02], "pose": { "xyz": [0, 0, -0.011], "rpy": [0, 0, 0] } },
+    { "type": "box", "size": [0.32, 0.06, 0.9], "pose": { "xyz": [0.22, 0.381, 0.45], "rpy": [0, 0, 1.0472] } }
+  ]
+}

@@ -185,6 +185,15 @@ touch, and what makes it done.
   keep producing identical results — they are the regression set. The collision checker stays
   as it is unless profiling names it (see Non-goals).
 - **Done when.** A URDF-described arm plans and renders through the same CLI contract.
+- **Status.** Delivered for one 6-DOF UR5 (`R=1`): `mlmp -a BiQRRT -i ur5_scene1.json` loads
+  the vendored `inputs/robots/ur5.urdf`, plans in 6-D joint space over the same bundle
+  hierarchy with FCL collision checking, and prints `mlmp.run/1` with
+  `model`/`dof`/`robot_model`/`robot_urdf` added; `mlmp/tools/renderUrdf.py` turns that
+  stdout into an MP4 and a GIF. Still open: heterogeneous teams and multi-agent URDF scenes
+  (the interleaved `values[link * numRobots + robot]` layout and the `Projection_RN_RM`
+  prefix invariant make them a separate design — the loader rejects `robots.size() != 1`),
+  and branched URDFs such as a Panda gripper (the single-chain loader throws
+  `UnsupportedUrdf`).
 
 ### Track E — Run the planner in the browser (Phase 6)
 

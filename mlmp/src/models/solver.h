@@ -18,6 +18,8 @@
 #include <models/scene.h>
 #include <state/counting_state_sampler.h>
 #include <state/kinematic_chain.h>
+#include <state/urdf_chain.h>
+#include <state/urdf_validity_checker.h>
 #include "common/geometry.h"
 
 #include <ompl/base/PlannerData.h>
@@ -147,17 +149,38 @@ public:
         result.scenePath = options.scenePath;
         result.robots = scene_.getR();
         result.links = scene_.getN();
+        result.model = scene_.getModel() == RobotModel::Urdf ? "urdf" : "planar";
+        result.dof = scene_.getDof();
+#ifdef MLMP_ENABLE_URDF
+        if (scene_.getModel() == RobotModel::Urdf) {
+            result.robotModel = scene_.getUrdfRobot()->name;
+            result.robotUrdf = scene_.getUrdfPath();
+        }
+#endif
         result.timeLimitS = options.timeLimit;
         result.traced = static_cast<bool>(options.traceSink);
         result.traceFile = options.traceFile;
 
         auto ss = buildSetup();
 
+        /* getN() is links-per-robot for a planar scene and the actuated joint count for
+         * a URDF scene, so one expression gives both models the right level sequence. */
         std::vector<int> discrete;
         boost::push_back(discrete, boost::irange(2, scene_.getN() + 1));
 
         const SpaceInformationPtr topSi = ss->getSpaceInformation();
         PlannerPtr planner = buildPlanner(options.algo, discrete, topSi);
+
+        /* BiQRRTImpl's step size is tuned for the planar unit square; a 6-DOF arm's
+         * joint space has an extent near 29 rad, where 0.1 is a crawl. Every other
+         * planner derives its own range from SelfConfig, so only BiQRRT needs this.
+         * Planar runs never call setRange, so their RNG stream cannot move. */
+        if (scene_.getModel() == RobotModel::Urdf) {
+            if (auto bi = std::dynamic_pointer_cast<ompl::multilevel::BiQRRT>(planner)) {
+                bi->setRange(topSi->getMaximumExtent() * 0.05);
+            }
+        }
+
         ss->setPlanner(planner);
 
         const ProblemDefinitionPtr pdef = ss->getProblemDefinition();
@@ -300,8 +323,72 @@ private:
         return space;
     }
 
+#ifdef MLMP_ENABLE_URDF
+    /* The single place a URDF state space is constructed, so every level is counted. */
+    std::shared_ptr<UrdfChainSpace> makeUrdfSpace(unsigned int numJoints) {
+        auto space = std::make_shared<UrdfChainSpace>(scene_.getUrdfRobot(), numJoints);
+        attachSamplerCounter(*space, counters_);
+        return space;
+    }
+
+    Eigen::Isometry3d urdfBase() const {
+        return poseFromXyzRpy(scene_.getBaseXyz(), scene_.getBaseRpy());
+    }
+
+    std::shared_ptr<UrdfValidityChecker> makeUrdfChecker(const SpaceInformationPtr& si,
+                                                         unsigned int numJoints) {
+        return std::make_shared<UrdfValidityChecker>(
+            si, scene_.getUrdfRobot(), numJoints, urdfBase(), scene_.getObstacles3d(),
+            scene_.getDisabledPairs(), counters_);
+    }
+
+    /* Joint-space step between discrete motion checks, in radians.
+     *
+     * Measured, not guessed: OMPL's default longestValidSegmentFraction of 0.01 over a
+     * 6-DOF arm's ~29 rad extent gives a 0.29 rad step, which at the UR5's ~0.5 m reach
+     * sweeps ~0.14 m between checks. A BiQRRT solution produced at that resolution
+     * contained a configuration this very checker rejects. 0.02 rad sweeps ~1 cm, which
+     * is below the thinnest obstacle in the committed scene.
+     *
+     * The planar path deliberately keeps OMPL's default: changing it would move every
+     * pinned planar number, and Track B owns that measurement. */
+    static constexpr double kUrdfCheckStepRad = 0.02;
+
+    void setUrdfCheckResolution(const SpaceInformationPtr& si) const {
+        si->setStateValidityCheckingResolution(kUrdfCheckStepRad /
+                                               si->getStateSpace()->getMaximumExtent());
+    }
+#endif
+
     /* SimpleSetup is not copyable, hence the unique_ptr. */
     std::unique_ptr<og::SimpleSetup> buildSetup() {
+        return scene_.getModel() == RobotModel::Urdf ? buildUrdfSetup() : buildPlanarSetup();
+    }
+
+    std::unique_ptr<og::SimpleSetup> buildUrdfSetup() {
+#ifdef MLMP_ENABLE_URDF
+        const unsigned int joints = static_cast<unsigned int>(scene_.getN());
+        auto space = makeUrdfSpace(joints);
+        auto ss = std::make_unique<og::SimpleSetup>(space);
+
+        ss->setStateValidityChecker(makeUrdfChecker(ss->getSpaceInformation(), joints));
+        setUrdfCheckResolution(ss->getSpaceInformation());
+
+        ScopedState<> start(space), goal(space);
+        space->setup();
+        /* No flattenAngles: a single URDF robot's angles are already in joint order. */
+        space->copyFromReals(start.get(), scene_.getUrdfStart());
+        space->copyFromReals(goal.get(), scene_.getUrdfGoal());
+        ss->setStartAndGoalStates(start, goal);
+
+        return ss;
+#else
+        /* Unreachable: main.cpp rejects a URDF scene before Solver is constructed. */
+        throw std::runtime_error("built without URDF support");
+#endif
+    }
+
+    std::unique_ptr<og::SimpleSetup> buildPlanarSetup() {
         auto chain = makeChainSpace(scene_.getN());
         auto ss = std::make_unique<og::SimpleSetup>(chain);
 
@@ -340,12 +427,29 @@ private:
         for (unsigned int k = 0; k < sequenceLinks.size(); k++) {
             const unsigned int links = static_cast<unsigned int>(sequenceLinks.at(k) - 1);
             assert(links < numLinks);
-            OMPL_INFORM("Create MultiLevel Chain with %d links, and %d robots", links, numRobots);
-            auto spaceK = makeChainSpace(links);
+            StateSpacePtr spaceK;
+            SpaceInformationPtr siK;
 
-            auto siK = std::make_shared<SpaceInformation>(spaceK);
-            siK->setStateValidityChecker(std::make_shared<KinematicChainValidityChecker>(
-                siK, scene_.getPinnedPositions(), numRobots, links, counters_));
+            if (scene_.getModel() == RobotModel::Urdf) {
+#ifdef MLMP_ENABLE_URDF
+                OMPL_INFORM("Create MultiLevel URDF chain with %d joints", links);
+                auto urdfSpace = makeUrdfSpace(links);
+                siK = std::make_shared<SpaceInformation>(urdfSpace);
+                siK->setStateValidityChecker(makeUrdfChecker(siK, links));
+                setUrdfCheckResolution(siK);
+                spaceK = urdfSpace;
+#else
+                throw std::runtime_error("built without URDF support");
+#endif
+            } else {
+                OMPL_INFORM("Create MultiLevel Chain with %d links, and %d robots", links, numRobots);
+                auto chainSpace = makeChainSpace(links);
+                siK = std::make_shared<SpaceInformation>(chainSpace);
+                siK->setStateValidityChecker(std::make_shared<KinematicChainValidityChecker>(
+                    siK, scene_.getPinnedPositions(), numRobots, links, counters_));
+                spaceK = chainSpace;
+            }
+
             spaceK->setup();
             si_vec.push_back(siK);
             levelSpaceInfos_.push_back(siK);
