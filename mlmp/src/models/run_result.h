@@ -92,7 +92,7 @@ inline const char* treeLabel(unsigned int component) {
     switch (component) {
         case 1: return "start";
         case 2: return "goal";
-        case 3: return "path";
+        case 3: return "section";
         default: return "untagged";
     }
 }

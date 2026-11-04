@@ -14,7 +14,7 @@
 const TREE_COLORS = {
   start: '#1f77b4',
   goal: '#d62728',
-  path: '#2ca02c',
+  section: '#9467bd',
   untagged: '#7f7f7f',
 };
 const PADDING = 0.05;
@@ -216,13 +216,13 @@ function drawFrame(ctx, project, panel, index) {
     }
   }
 
-  /* `path` last so the lifted solution stays legible on top of both trees. */
-  for (const pathLayer of [false, true]) {
+  /* `section` last so the findSection() configurations stay legible on top of both trees. */
+  for (const sectionLayer of [false, true]) {
     for (let i = 0; i < nv && i < vertices.length; i++) {
       const v = vertices[i];
-      if (!state.levels.has(v.level) || (v.tree === 'path') !== pathLayer) continue;
+      if (!state.levels.has(v.level) || (v.tree === 'section') !== sectionLayer) continue;
       ctx.fillStyle = hexToRgba(TREE_COLORS[v.tree] || TREE_COLORS.untagged, v.alpha);
-      const radius = v.tree === 'path' ? 2.4 : 1.5;
+      const radius = v.tree === 'section' ? 2.4 : 1.5;
       for (const [x, y] of v.tips) {
         const [px, py] = project(x, y);
         ctx.beginPath();
