@@ -28,6 +28,11 @@ namespace ompl
             void clear() override;
             void getPlannerData(ompl::base::PlannerData &data) const override;
 
+            /** \brief Shadows BundleSpaceGraph::setRange (non-virtual there) so that an
+             * explicit step size survives setup(), which otherwise overwrites it with
+             * the planar default. */
+            void setRange(double distance);
+
         protected:
             using TreeData = std::shared_ptr<NearestNeighbors<Configuration *>>;
             TreeData treeStart_;
@@ -35,6 +40,7 @@ namespace ompl
             double distanceBetweenTrees_;
 
             bool activeInitialTree_{true};
+            bool rangeSetExplicitly_{false};
         };
     }  // namespace multilevel
 }  // namespace ompl

@@ -10,6 +10,16 @@ env:
   # BiQRRT only: QRRT solved no scene 3/3, its best was scene1 2/3 at 30 s, so gating on
   # it would be flaky. Tracked as an open item in Phase 2 of ROADMAP.md.
   SOLVE_SCENE: scene1.json
+  # URDF scene: one 6-DOF UR5 that must swing around a radial wall. The gate is seed 42,
+  # which solves 3/3 in ~0.03 s — a ~70x margin on the 2 s budget. Other seeds are not
+  # gated and are not uniform: re-measured locally at --time-limit 1, seed 99 solves 3/3
+  # (~0.71 s) and seed 7 solves 0/3 even at 2 s. Keep the gate on seed 42.
+  URDF_SCENE: ur5_scene1.json
+  URDF_SOLVE_BUDGET: "2"
+  # Planar regression pin: the planar path must not move when the URDF path is touched.
+  # Measured locally on mlmp:dev and reproduced after every change in this track.
+  # Per-runner if GitHub's value differs; see the note on the step below.
+  PLANAR_RAW_PIN: "6.1990845726570605"
 
 jobs:
   build-and-smoke:
@@ -31,17 +41,47 @@ jobs:
         run: |
           set -u
           failed=0
-          for a in BiQRRT QRRT QRRTStar QMP QMPStar \
-                   RRT RRTConnect PRMStar BITStar AITStar EITStar LBKPIECE; do
-            docker run --rm mlmp:ci --algo "$a" --input-file "$SMOKE_SCENE" --time-limit 2 \
-              >/dev/null 2>&1 && code=0 || code=$?
-            case "$code" in
-              0) echo "ok   $a (solved)" ;;
-              1) echo "ok   $a (no solution in budget)" ;;
-              *) echo "FAIL $a (exit $code)"; failed=1 ;;
-            esac
+          for s in "$SMOKE_SCENE" "$URDF_SCENE"; do
+            for a in BiQRRT QRRT QRRTStar QMP QMPStar \
+                     RRT RRTConnect PRMStar BITStar AITStar EITStar LBKPIECE; do
+              docker run --rm mlmp:ci --algo "$a" --input-file "$s" --time-limit 2 \
+                >/dev/null 2>&1 && code=0 || code=$?
+              case "$code" in
+                0) echo "ok   $s $a (solved)" ;;
+                1) echo "ok   $s $a (no solution in budget)" ;;
+                *) echo "FAIL $s $a (exit $code)"; failed=1 ;;
+              esac
+            done
           done
           exit "$failed"
+
+      - name: URDF solve check
+        run: |
+          set -eu
+          docker run --rm mlmp:ci --algo BiQRRT --input-file "$URDF_SCENE" \
+            --time-limit "$URDF_SOLVE_BUDGET" --seed 42 | python3 -c '
+          import json,sys
+          r=json.load(sys.stdin)
+          assert r["solved"] is True and r["exact"] is True, r["status"]
+          assert r["model"]=="urdf", r["model"]
+          assert r["dof"]==6 and r["robots"]==1 and r["links"]==6, (r["dof"],r["robots"],r["links"])
+          assert r["robot_model"]=="ur5", r["robot_model"]
+          assert r["robot_urdf"].endswith("ur5.urdf"), r["robot_urdf"]
+          assert r["path_states"]>1 and len(r["path"])==r["path_states"], r["path_states"]
+          assert all(len(q)==6 for q in r["path"]), "path states are not 6-DOF"
+          '
+
+      - name: Planar regression pin
+        run: |
+          # Guards the one constraint of Track D: adding the URDF path must not move a
+          # planar number. If this ever fails on a fresh runner without a planar code
+          # change, record the observed value here rather than deleting the check; the
+          # two-run equality check below remains the real determinism gate.
+          set -eu
+          raw=$(docker run --rm mlmp:ci --algo BiQRRT --input-file "$SOLVE_SCENE" \
+                  --time-limit 10 --seed 42 \
+                | python3 -c 'import json,sys;print(repr(json.load(sys.stdin)["path_length_raw"]))')
+          test "$raw" = "$PLANAR_RAW_PIN" || { echo "planar regression: $raw != $PLANAR_RAW_PIN"; exit 1; }
 
       - name: Solve check
         run: |
@@ -59,6 +99,9 @@ jobs:
           assert r["schema"]=="mlmp.run/1", r.get("schema")
           assert r["solved"] is True and r["exact"] is True, r["status"]
           assert r["seed"]==42, r["seed"]
+          assert r["model"]=="planar", r["model"]
+          assert r["dof"]==8 and r["robots"]==2 and r["links"]==4, (r["dof"],r["robots"],r["links"])
+          assert r["robot_model"] is None and r["robot_urdf"] is None, r["robot_model"]
           assert r["path_length_raw"]>0, r["path_length_raw"]
           assert r["path_length_simplified"]>0, r["path_length_simplified"]
           assert r["state_validity_checks"]>0, "validity checks never counted"

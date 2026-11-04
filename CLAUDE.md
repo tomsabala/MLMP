@@ -26,7 +26,10 @@ everything else is header-only. A bare scene name (`scene1.json`) resolves again
 (the image sets `/opt/mlmp/scenes`; the `mlmp/src/inputs/*.json` dev scenes go to its `dev/` subfolder).
 
 `mlmp/tools/plotScene.py` renders scenes with matplotlib. It reads `../src/inputs/experiment/`, so run
-it from `mlmp/tools/`.
+it from `mlmp/tools/`. `mlmp/tools/renderUrdf.py` is its 3D counterpart: it pipes a `mlmp.run/1`
+object from a URDF scene into MuJoCo and writes an MP4 and a GIF. It needs
+`pip install 'mujoco>=3.2' imageio imageio-ffmpeg` plus apt `libosmesa6 libgl1`, and is not in
+the image.
 
 `docs/` is a dependency-free trace player (`docs/app.js`) over 12 committed `mlmp.traceviz/1`
 fixtures in `docs/traces/`, plus the README GIF. `mlmp/tools/recordTraces.sh` re-records them
@@ -46,6 +49,9 @@ There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs
    every vertex, `trace.errors == 0`, `trace.frames` matching the line count, both `start` and
    `goal` among the `tree` labels, and no `untagged` vertex.
 5. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
+6. **URDF solve**: BiQRRT must solve `ur5_scene1.json` within 2 s with `model == "urdf"`, `dof == 6`.
+7. **Planar regression pin**: `scene1.json --seed 42` must still report `path_length_raw ==
+   6.1990845726570605`. This is the Track D constraint — the planar numbers must not move.
 
 To check a change locally, rebuild the image and run those same `docker run` commands. Only BiQRRT gates
 the solve check, because QRRT doesn't solve any scene reliably. Expect `scene4`/`scene6` to exit 1.
@@ -76,6 +82,27 @@ Level spaces are kept in `levelSpaceInfos_` so motion-check counts can be summed
 State layout is interleaved by link, so a lower level is a prefix of the higher one:
 `values[link * numRobots + robot]`.
 
+**URDF scenes take a parallel path, chosen at load time.** `metadata.model` is `"planar"`
+(default) or `"urdf"`; `Scene::loadUrdfScene` handles the latter and the planar branch is left
+byte-identical, because the planar scenes are the regression set. A URDF scene supports exactly
+one robot. `models/urdf_robot.h` flattens the URDF into a serial chain of actuated joints
+(fixed joints folded into neighbouring transforms, branches/meshes/prismatic rejected with
+`UnsupportedUrdf` -> `error.kind == "usage"`); `state/urdf_chain.h` is a plain `RealVectorStateSpace`
+in joint space, deliberately overriding nothing so `Projection_RN_RM` still makes level k a prefix
+of level k+1; `state/urdf_validity_checker.h` does FCL narrowphase, keeping only the shapes of the
+first k joints so a level's geometry matches its DOF. `Scene::getN()` returns the actuated joint
+count and `getR()` returns 1, so `solve()`'s level sequence needs no model-specific arithmetic.
+The whole thing is behind `MLMP_ENABLE_URDF` (default ON, needs `liburdfdom-dev` + `libfcl-dev`);
+with it off a URDF scene exits 2 with `error.kind == "usage"`.
+
+**URDF collision resolution is set explicitly, planar is not.** OMPL's default
+`longestValidSegmentFraction` of 0.01 over a 6-DOF arm's ~29 rad extent sweeps ~0.14 m between
+checks, and a measured BiQRRT solution contained a state its own checker rejects.
+`Solver::setUrdfCheckResolution` pins the step to `kUrdfCheckStepRad` (0.02 rad, ~1 cm swept).
+The planar path keeps OMPL's default on purpose: changing it moves every pinned planar number.
+`BiQRRTImpl::setup()` likewise only forces `maxDistance_ = 0.1` when nobody called `setRange`,
+and `Solver` calls `BiQRRT::setRange(maxExtent * 0.05)` for URDF runs only.
+
 **Geometry** (`state/kinematic_chain.h`). `KinematicChainSpace` is a `RealVectorStateSpace` with
 custom angle-wrapping `distance`/`interpolate`/`enforceBounds`. The custom distance isn't additive along
 interpolation, so `path_length_simplified` can be *greater* than `path_length_raw`. Never assert that
@@ -99,15 +126,16 @@ padded bounding box. Scene JSON angles are integer degrees, converted to radians
   not reproducible. Both determinism gates (`ci.yml`, `web/test/smoke.mjs`) therefore compare untraced
   runs.
 - **Counters are plain `uint64_t` in `RunCounters`**, since everything is single-threaded. Every level's
-  space and checker must be wired to the same `counters_` (use `makeChainSpace`). `solve()` resets
-  counters and level handles so it can be called more than once.
+  space and checker must be wired to the same `counters_` (use `makeChainSpace`/`makeUrdfSpace`).
+  `solve()` resets counters and level handles so it can be called more than once.
 - **`captureFrame` needs a fresh `PlannerData` every time**, because `BundleSpaceSequence::getPlannerData`
   throws if the one it gets is already populated. A failed frame counts toward `trace.errors`; it isn't
   a run failure.
 
 `state/oriented_real_vector_state_space.h` isn't included anywhere (dead code). `BiQRRTImpl::setup()`
-hardcodes `maxDistance_ = 0.1`, and that is a known open item (ROADMAP Track F / §2.5). If you change it,
-re-measure the CI solve gate.
+still defaults `maxDistance_` to `0.1` whenever no caller set a range, and that planar default is a
+known open item (ROADMAP Track F / §2.5). If you change it, re-measure the CI solve gate and the
+planar regression pin.
 
 ## Releases
 

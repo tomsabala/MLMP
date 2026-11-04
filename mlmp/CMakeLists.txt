@@ -16,6 +16,10 @@ if(NOT EMSCRIPTEN)
 endif()
 find_package(nlohmann_json 3.11 REQUIRED)
 
+# URDF support is a native-only option: the wasm target never links urdfdom or FCL, and the
+# URDF headers are self-guarded on MLMP_ENABLE_URDF, so the browser build simply omits it.
+option(MLMP_ENABLE_URDF "Build URDF/3D support (urdfdom + FCL)" ON)
+
 if(EMSCRIPTEN)
     # src/main.cpp is deliberately absent: the wasm entry point owns its own I/O and option
     # handling, and boost::program_options is not linked here.
@@ -63,4 +67,13 @@ else()
         Boost::program_options
         nlohmann_json::nlohmann_json
     )
+
+    if(MLMP_ENABLE_URDF)
+        # urdfdom's config exports urdfdom::urdf_parser; FCL's exports a plain `fcl` target
+        # and pulls Eigen3 and ccd itself.
+        find_package(urdfdom REQUIRED)
+        find_package(fcl REQUIRED)
+        target_compile_definitions(mlmp PRIVATE MLMP_ENABLE_URDF)
+        target_link_libraries(mlmp PRIVATE urdfdom::urdf_parser fcl)
+    endif()
 endif()
