@@ -116,8 +116,8 @@ Line 1 is a header (`schema`, `planner`, `scene`, `seed`, `robots`, `links`,
 
 ```json
 {"frame":7,"t_s":0.35,"vertices":[
-  {"level":1,"component":1,"tree":"start","start":true,"goal":false,"q":[0.1,-0.4,0.0,0.0]},
-  {"level":1,"component":2,"tree":"goal","start":false,"goal":true,"q":[0.9,1.2,0.0,0.0]}],
+  {"level":0,"component":1,"tree":"start","start":true,"goal":false,"q":[0.1,-0.4,0.0,0.0]},
+  {"level":0,"component":2,"tree":"goal","start":false,"goal":true,"q":[0.9,1.2,0.0,0.0]}],
  "edges":[[0,1]]}
 ```
 
@@ -125,14 +125,14 @@ Line 1 is a header (`schema`, `planner`, `scene`, `seed`, `robots`, `links`,
 `vertices` array.)
 
 `--trace-interval-ms` (default 50) and `--trace-max-frames` (default 400) bound the output;
-hitting the cap sets `trace.truncated`. Measured on `scene1`/BiQRRT at a 10 s budget: 197
-frames spanning levels 0–3, every `q` of full dimension 8, `trace.errors` 0.
+hitting the cap sets `trace.truncated`. Measured on the committed `scene1`/BiQRRT recording at
+a 10 s budget: 199 frames spanning levels 0–3, every `q` of full dimension 8, `trace.errors` 0.
 
 **Tree tagging.** `component` is written by `BiQRRTImpl::getPlannerData`, which records
 `firstNew = data.numVertices()` before chaining to the base call and tags only the vertex
 range the base call appends, via `PlannerDataVertexAnnotated::setComponent` — lower levels of
 the sequence are already in `data` and belong to other instances with their own trees. `tree`
-is the string form, produced by `treeLabel` (`mlmp/src/models/run_result.h:91-99`), which is
+is the string form, produced by `treeLabel` (`mlmp/src/models/run_result.h:91-98`), which is
 the single definition of the vocabulary:
 
 |`component`|`tree`|meaning|
@@ -140,7 +140,7 @@ the single definition of the vocabulary:
 |0|`untagged`|any planner that does not tag — QRRT emits this for every vertex|
 |1|`start`|start tree|
 |2|`goal`|goal tree|
-|3|`path`|OMPL-injected solution-path state (`BundleSpaceGraph.cpp:804-823`), not a tree|
+|3|`section`|in the graph, in neither tree — mostly `findSection()` configurations, present whether or not the run solved|
 
 No consumer may test a planner name to decide how to colour a vertex; unknown or missing tags
 read as `untagged`. `start` and `goal` are `PlannerData::isStartVertex` / `isGoalVertex` —
@@ -151,8 +151,10 @@ lifts each level's states into the total space, so a frame's `q` is always `robo
 long, interleaved as `q[link * robots + robot]`. But a vertex at bundle level `L` only owns its
 first `L + 1` links per robot; everything above is identity-fibre padding re-derived from the
 planner's current section on every frame. The measured consequence (`mlmp/tools/packTrace.py`
-docstring): `scene1`/QRRT has 14 230 graph vertices but 2 296 535 distinct full `q` vectors
-across 196 frames — truncated to the owned prefix, exactly 14 230. A renderer that draws the
+docstring): the committed `scene1`/QRRT recording holds 193 frames that each re-dump a full `q`
+per graph vertex, and truncating to the owned prefix collapses the whole stream to 15 236
+distinct vertices — the same order as the run's own 15 247 `graph_vertices`, not equal to it
+because distinct prefixes merge states differing only in padding. A renderer that draws the
 untruncated tail renders churn that belongs to no vertex.
 
 **Frames are cumulative snapshots, not deltas.** Each one re-dumps the entire planner graph, so
@@ -212,10 +214,11 @@ touch, and what makes it done.
   `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` and the 5.7 MB README GIF; `docs/` — a
   dependency-free scrubber page with per-scene BiQRRT-vs-QRRT panels, frame stepping, level
   toggles and run captions; 12 packed fixtures and 6 scene copies.
-- **Not shipped: the module shape.** `docs/app.js` exports nothing, resolves ten elements by
-  id (`el` at `:22`, `panels` at `:33`) and does random access over a whole packed fixture, so
-  Track E cannot import it. And nothing committed draws `mlmp.run/1`'s `path` array — the
-  green on the page is `component == 3`, which is a different thing.
+- **Not shipped: the module shape.** `docs/app.js` exports nothing, resolves twelve elements
+  by id (eight in `el` at `:22-31`, four in `panels` at `:33-36`) and does random access over
+  a whole packed fixture, so Track E cannot import it. And nothing committed draws
+  `mlmp.run/1`'s `path` array — the purple on the page is `component == 3`, the `section`
+  vertices, which is a different thing.
 - **Done when.** `web/src/renderer.js` exists (Track E owns it — step 7 of
   `WASM_PLANNER_PORT_PLAN.md`), `docs/app.js` draws through it, and `showPath` renders the
   run's solution path. **Done** on `track-e/wasm-browser-planner`: the module ships at
@@ -307,7 +310,7 @@ touch, and what makes it done.
 ### Track F — Planner hygiene (§2.5)
 
 - **Scope.** Make `maxDistance_` a declared `Planner::declareParam` with a `SelfConfig`-derived
-  default instead of the hardcoded `0.1` at `BiQRRTImpl.cpp:29`, and answer whether the
+  default instead of the hardcoded `0.1` at `BiQRRTImpl.cpp:32`, and answer whether the
   BiQRRT/QRRT gap is real or a step-size artefact (QRRT's `SelfConfig` default logged as
   1.78–3.55 across `scene1`'s levels).
 - **Requires.** The gate. The raw-versus-simplified half of §2.5 is already delivered by it.

@@ -101,14 +101,19 @@ Measured by Track A on `track-a/trace-player` and carried over here; not re-deri
 
 - **Frame shape.** A frame is `{frame, t_s, vertices[], edges[]}`; `edges` are `[i, j]` index
   pairs into that frame's own `vertices`; a vertex is `{level, component, tree, start, goal, q}`
-  (`solver.h:398-410`).
-- **Tag vocabulary** is `0/1/2/3 → untagged/start/goal/path`, defined once in `treeLabel`
-  (`run_result.h:91-99`) and written only by `BiQRRTImpl::getPlannerData`
-  (`mlmp/src/planner/src/BiQRRTImpl.cpp:166-204`), which tags only the vertex range the base
-  call appends. `3` is an OMPL-injected solution-path state, not a tree.
+  (`solver.h:405-410`).
+- **Tag vocabulary** is `0/1/2/3 → untagged/start/goal/section`, defined once in `treeLabel`
+  (`run_result.h:91-98`) and written only by `BiQRRTImpl::getPlannerData`
+  (`mlmp/src/planner/src/BiQRRTImpl.cpp:166-209`), which tags only the vertex range the base
+  call appends. `3` means in the graph but in neither tree — mostly the configurations
+  `findSection()` adds — and is present whether or not the run solved, so it is not the
+  solution path.
 - **A vertex at level `L` owns only its first `L + 1` links per robot**; the tail is
-  identity-fibre padding re-derived each frame. `scene1`/QRRT: 14 230 graph vertices, but
-  2 296 535 distinct full `q` vectors across 196 frames — 14 230 once truncated.
+  identity-fibre padding re-derived each frame. The committed `scene1`/QRRT recording holds
+  193 frames that each re-dump a full `q` per graph vertex; truncating to the owned prefix
+  collapses the whole stream to 15 236 distinct vertices, the same order as the run's own
+  15 247 `graph_vertices` (not equal — distinct prefixes merge states differing only in the
+  padding).
 - **Frames are cumulative snapshots**, not deltas; retaining them is what makes a raw 10 s
   recording 0.3–0.9 GB, and why `mlmp.traceviz/1` exists for the committed fixtures.
 - **Level filtering is load-bearing, not cosmetic**: unchecking L3 on `scene1` drops painted
@@ -145,10 +150,11 @@ Measured by Track A on `track-a/trace-player` and carried over here; not re-deri
 
 ## Renderer — owned by Track E
 
-Track A shipped page-shaped, not module-shaped: `docs/app.js` exports nothing, resolves ten
-elements by id and does random access over a whole packed fixture. So Track E builds
-`web/src/renderer.js` to the specification below (step 7), and Track A retrofits `docs/app.js`
-onto it. There is exactly one JS drawing path and one JS forward-kinematics implementation.
+Track A shipped page-shaped, not module-shaped: `docs/app.js` exports nothing, resolves twelve
+elements by id (eight in `el`, four in `panels`) and does random access over a whole packed
+fixture. So Track E builds `web/src/renderer.js` to the specification below (step 7), and
+Track A retrofits `docs/app.js` onto it. There is exactly one JS drawing path and one JS
+forward-kinematics implementation.
 
 ```js
 export function createTracePlayer({ canvas, scene }) -> {
@@ -176,8 +182,8 @@ export function createTracePlayer({ canvas, scene }) -> {
    arrive pre-truncated — by breaking when the index passes the end of the array.
 4. **`showPath` is the one place the untruncated FK is correct.** `mlmp.run/1` `path` entries
    are real full-dimension configurations, so draw whole arms through every joint, visually
-   distinct from `component == 3` vertices (which are OMPL-injected path states in the graph,
-   a different thing).
+   distinct from `component == 3` (`section`) vertices, which are graph vertices in neither
+   tree — mostly `findSection()` configurations — and are not the solution path.
 5. **Scene is a separate, replaceable input.** `mlmp.trace/1` carries no geometry. The
    renderer takes scene JSON (obstacles, `pinnedPosition`, `jointLength`, `metadata.n`)
    separately and accepts a new one at runtime via `setScene`, because Track E changes
@@ -452,7 +458,7 @@ benchmark numbers."* This is required, not cosmetic: `ROADMAP.md:204-205` states
 is never a timing run, and every browser run is traced by construction.
 
 **Error and invalid-scene rendering.** The returned object is either a result or
-`{schema, error:{kind,message}}` (`run_result.h:145-148`). Branch on the presence of
+`{schema, error:{kind,message}}` (`run_result.h:155-158`). Branch on the presence of
 `error` and show the message inline. For results, map `status` (`run_result.h:75-88`) to a
 message: `invalid_start` → "this obstacle blocks a robot's start configuration",
 `invalid_goal` → "…goal configuration", `timeout` → "no solution found in N s", and draw
@@ -466,11 +472,12 @@ Track E's deliverable, not a fallback, and it does not block on Track A. Impleme
 verbatim from the two shipped copies (`docs/app.js`, `mlmp/tools/traceGif.py`), which already
 agree; `main.js` then imports the module and uses only its six methods.
 
-- **Colour by tree** (`TREE_COLORS`): `start #1f77b4`, `goal #d62728`, `path #2ca02c`,
-  `untagged #7f7f7f`.
+- **Colour by tree** (`TREE_COLORS`): `start #1f77b4`, `goal #d62728`, `section #9467bd`,
+  `untagged #7f7f7f`. Green `#2ca02c` is not a tree colour: reserve it for `showPath`, the
+  only thing that draws the genuine returned solution path.
 - **Opacity by level**: `alpha = 0.35 + 0.65 * level / max(1, links - 1)`.
-- **Dots**: radius `2.4` for `path`, `1.5` otherwise; the `path` layer drawn last so the
-  lifted solution stays legible on top of both trees.
+- **Dots**: radius `2.4` for `section`, `1.5` otherwise; the `section` layer drawn last so
+  those configurations stay legible on top of both trees.
 - **Edges**: one segment per robot between the two endpoints' tips, each endpoint using its
   own level for FK, `lineWidth 0.8`, stroke alpha `0.25`, coloured by the source vertex;
   skipped entirely when either endpoint's level is hidden.
@@ -551,9 +558,9 @@ a link back to `../`. A visitor who lands on either must be able to reach the ot
 
 | File | Anchor | Why |
 |---|---|---|
-| `mlmp/src/models/solver.h` | `solve()` at `:136`, PTC lambda `:197-222`, `captureFrame` `:379-418` | The contract the wasm entry point calls. Read before writing `entry.cpp`; do not modify. |
+| `mlmp/src/models/solver.h` | `solve()` at `:136`, PTC lambda `:197-222`, `captureFrame` `:379-420` | The contract the wasm entry point calls. Read before writing `entry.cpp`; do not modify. |
 | `mlmp/src/main.cpp` | `main()` at `:118-190` | The template for `entry.cpp`: seed ordering, option fill, trace sink wiring, error shapes. |
-| `mlmp/src/models/run_result.h` | `RunOptions` `:22-32`, `toJson` `:98-141`, `errorJson` `:145-148` | Exact field names and the two wire shapes the page branches on. |
+| `mlmp/src/models/run_result.h` | `RunOptions` `:22-32`, `toJson` `:108-151`, `errorJson` `:155-158` | Exact field names and the two wire shapes the page branches on. |
 | `mlmp/CMakeLists.txt` | `find_package(Boost …)` `:11`, `add_executable` `:14-17` | The one file where the native and wasm builds diverge. |
 | `mlmp/src/state/kinematic_chain.h` | `computeRobotSegments` `:199-222`, bounds `:55-58` | The FK the renderer must reproduce, and the reason obstacle edits never change the state space. |
 

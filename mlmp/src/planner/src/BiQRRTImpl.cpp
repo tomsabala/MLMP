@@ -198,8 +198,9 @@ void BiQRRTImpl::getPlannerData(ompl::base::PlannerData &data) const
         else if (goalStates.count(s) > 0)
             v->setComponent(2);
         else
-            /* Not in either tree: an OMPL-injected solution-path state
-             * (BundleSpaceGraph.cpp:804-823). */
+            /* In the graph but in neither tree. Mostly the configurations findSection()
+             * adds at grow():117 — they enter graph_ without joining treeStart_ or
+             * treeGoal_, and they exist whether or not the run ever solves. */
             v->setComponent(3);
     }
 

@@ -11,7 +11,7 @@
  *
  * The sibling *.run.json holds the mlmp.run/1 result, whose `path` is a real full-dimension
  * solution; showPath draws it as connected arms. Only the two solved runs have a non-empty one. */
-import { TREE_COLORS, createTracePlayer } from './renderer.js';
+import { PATH_COLOR, TREE_COLORS, createTracePlayer } from './renderer.js';
 
 const el = {
   scene: document.getElementById('scene'),
