@@ -9,9 +9,14 @@ properties of the stream make it compressible without losing anything a renderer
 
   * A vertex at bundle level L owns only its first L+1 links per robot. The tail above L is
     identity-fibre padding re-derived from the planner's current section every frame, which is
-    why the raw states churn: scene1/QRRT has 14 230 graph vertices but 2 296 535 distinct full
-    q vectors across 196 frames. Truncated to the owned prefix, the same run has exactly 14 230
-    distinct vertices — the padding was all of the churn.
+    why the raw states churn: every one of the 193 frames in the committed scene1/QRRT
+    recording re-dumps a full q vector for each graph vertex it holds at that instant.
+    Truncating to the owned prefix collapses that whole stream to 15 236 distinct vertices —
+    the same order as the planner's own graph, which docs/traces/scene1-qrrt.run.json reports
+    as 15 247 vertices. (Not equal: distinct prefixes merge states that differ only in the
+    padding, and the last frame is captured before the run's final vertices are added.) The
+    padding was all of the churn. The figures above come from the committed fixtures; the raw
+    streams are too large to commit, so a distinct-full-q count cannot be recomputed here.
   * Truncated that way, each frame's vertex and edge sets are supersets of the previous frame's
     (the graph only grows). Assigning ids in order of first appearance therefore makes frame k
     exactly `vertices[:nv]` and `edges[:ne]`.
@@ -24,7 +29,7 @@ import json
 import sys
 from pathlib import Path
 
-TREE_CODES = {0: "untagged", 1: "start", 2: "goal", 3: "path"}
+TREE_CODES = {0: "untagged", 1: "start", 2: "goal", 3: "section"}
 RUN_KEYS = (
     "planner",
     "scene",
@@ -48,9 +53,13 @@ def packTrace(tracePath, runPath, digits):
     edgeIds = {}
     edges = []
     frames = []
+    # The stream is far too large to buffer, so a decode failure is held open for one line
+    # instead: if anything later parses, the held line was mid-stream corruption, not the
+    # truncated final line a killed recorder leaves behind.
+    pendingBadLine = None
 
     with open(tracePath, "r") as f:
-        for line in f:
+        for lineNo, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
@@ -58,7 +67,18 @@ def packTrace(tracePath, runPath, digits):
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 # Only a truncated final line is tolerable; anything earlier is corruption.
+                if pendingBadLine is not None:
+                    raise SystemExit(
+                        f"{tracePath}: line {pendingBadLine} is not valid JSON and line "
+                        f"{lineNo} fails to decode as well; the stream is corrupt"
+                    )
+                pendingBadLine = lineNo
                 continue
+            if pendingBadLine is not None:
+                raise SystemExit(
+                    f"{tracePath}: line {pendingBadLine} is not valid JSON but line {lineNo} "
+                    "parses; that is mid-stream corruption, not a truncated final line"
+                )
             if header is None:
                 header = obj
                 if header.get("schema") != "mlmp.trace/1":

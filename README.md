@@ -3,8 +3,9 @@
 ![BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget](docs/biqrrt-vs-qrrt.gif)
 
 Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
-seed: blue is the start tree, red the goal tree, green the solution path lifted out of a solved
-level, and opacity is the bundle level. Step it frame by frame, pick another scene and toggle
+seed: blue is the start tree, red the goal tree, purple the graph vertices in neither tree —
+mostly the configurations `findSection()` produces, which exist whether or not the run solved —
+and opacity is the bundle level. Step it frame by frame, pick another scene and toggle
 levels in the [trace player](https://tomsabala.github.io/MLMP/).
 
 ```sh
@@ -59,8 +60,15 @@ The same seed reproduces the same path (`path_length_raw`, `path_length_simplifi
 not reproduce the iteration counters: the multilevel planners consume the whole `--time-limit`,
 so vertex, sample and check counts track host speed. `--trace-file` writes a separate JSONL
 stream — one header line, then one frame per interval — described under "Track gate" in
-[ROADMAP.md](ROADMAP.md). Each frame vertex carries `level`, `tree` (`start`, `goal`, `path`, or
-`untagged` for planners that do not tag trees), `start`/`goal` flags and a full-dimension `q`.
+[ROADMAP.md](ROADMAP.md). Each frame vertex carries `level`, `tree` (`untagged`, `start`,
+`goal`, or `section` for graph vertices in neither tree; planners that do not tag trees report
+`untagged` throughout), `start`/`goal` flags and a full-dimension `q`.
+
+A *traced* run is not byte-reproducible even at a fixed seed: frame capture spends part of the
+wall-clock budget and `getPlannerData` draws from the global RNG, so a `--trace-file` run's path
+fields differ between invocations and from the untraced `--seed 42` numbers. The `.run.json`
+files committed beside the trace fixtures in `docs/traces/` are records of one recording, not
+reproducible targets.
 
 ### Algorithms
 
@@ -158,6 +166,9 @@ planner graph, so a raw 10 s recording is 0.3–0.9 GB, while the packed fixture
 It stores each vertex once, truncated to the links that vertex's bundle level actually owns —
 the lifted tail above the level is identity-fibre padding that changes every frame — so a frame
 is just a timestamp plus a vertex and edge count.
+
+Re-recording rewrites the `.run.json` files beside the fixtures with new path numbers; traced
+runs are not byte-reproducible (see "Output" above), so that is expected.
 
 ## Experiment harness
 

@@ -29,7 +29,7 @@ from PIL import Image  # noqa: E402
 TREE_COLORS = {
     "start": "#1f77b4",
     "goal": "#d62728",
-    "path": "#2ca02c",
+    "section": "#9467bd",
     "untagged": "#7f7f7f",
 }
 PADDING = 0.05
@@ -119,7 +119,7 @@ class Panel:
         codes = {int(k): v for k, v in packed["tree_codes"].items()}
         sceneRobots = scene["robots"]
 
-        tips, colors, sizes, isPath = [], [], [], []
+        tips, colors, sizes, isSection = [], [], [], []
         for level, component, *q in packed["vertices"]:
             tree = codes.get(component, "untagged")
             rgb = hexToRgb(TREE_COLORS.get(tree, TREE_COLORS["untagged"]))
@@ -128,13 +128,13 @@ class Panel:
             tips.append(vertexTips)
             for _ in vertexTips:
                 colors.append(rgb + (alpha,))
-                sizes.append(6.0 if tree == "path" else 3.0)
-                isPath.append(tree == "path")
+                sizes.append(6.0 if tree == "section" else 3.0)
+                isSection.append(tree == "section")
         self.robotsPerVertex = len(sceneRobots)
         self.tips = np.array(tips).reshape(-1, 2) if tips else np.zeros((0, 2))
         self.colors = np.array(colors) if colors else np.zeros((0, 4))
         self.sizes = np.array(sizes)
-        self.isPath = np.array(isPath, dtype=bool)
+        self.isSection = np.array(isSection, dtype=bool)
 
         segments, segColors = [], []
         tipsByVertex = tips
@@ -159,8 +159,8 @@ class Panel:
                 )
             )
         if pts:
-            mask = self.isPath[:pts]
-            # `path` last so the lifted solution stays legible on top of both trees.
+            mask = self.isSection[:pts]
+            # `section` last so the findSection() configurations stay legible on both trees.
             for layer in (~mask, mask):
                 if layer.any():
                     ax.scatter(
