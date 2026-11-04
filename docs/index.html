@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLMP trace player — BiQRRT vs QRRT</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>MLMP trace player</h1>
+  <p>Committed <code>mlmp.traceviz/1</code> fixtures packed from <code>mlmp.trace/1</code>
+     recordings — seed 42, 10 s budget, 50 ms per frame. Colour is tree membership, opacity is
+     bundle level, and each dot is one robot's chain tip at that vertex's bundle level
+     (a level-<em>L</em> vertex owns only its first <em>L</em>+1 links).</p>
+</header>
+
+<section class="controls">
+  <label>Scene
+    <select id="scene">
+      <option value="scene1">scene1</option>
+      <option value="scene2">scene2</option>
+      <option value="scene3">scene3</option>
+      <option value="scene4">scene4</option>
+      <option value="scene5">scene5</option>
+      <option value="scene6">scene6</option>
+    </select>
+  </label>
+  <button id="play">Play</button>
+  <button id="prev">−1</button>
+  <button id="next">+1</button>
+  <input id="slider" type="range" min="0" max="0" value="0">
+  <span id="counter" class="counter">0 / 0</span>
+  <span id="levels" class="levels"></span>
+  <span id="legend" class="legend"></span>
+</section>
+
+<section class="panels">
+  <figure>
+    <canvas id="canvasA" width="520" height="520"></canvas>
+    <figcaption id="captionA">loading…</figcaption>
+  </figure>
+  <figure>
+    <canvas id="canvasB" width="520" height="520"></canvas>
+    <figcaption id="captionB">loading…</figcaption>
+  </figure>
+</section>
+
+<footer>
+  <p>Want to run the planner yourself? The <a href="live/">live wasm playground</a> solves
+     edited scenes in the browser, drawing through this page's renderer module.</p>
+  <p>Fixtures regenerated with <code>mlmp/tools/recordTraces.sh</code>; the README loop comes
+     from <code>mlmp/tools/traceGif.py</code>. Source:
+     <a href="https://github.com/tomsabala/MLMP">tomsabala/MLMP</a>.</p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

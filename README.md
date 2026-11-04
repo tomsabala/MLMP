@@ -1,5 +1,13 @@
 # Motion Planning Experiment
 
+![BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget](docs/biqrrt-vs-qrrt.gif)
+
+Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
+seed: blue is the start tree, red the goal tree, purple the graph vertices in neither tree —
+mostly the configurations `findSection()` produces, which exist whether or not the run solved —
+and opacity is the bundle level. Step it frame by frame, pick another scene and toggle
+levels in the [trace player](https://tomsabala.github.io/MLMP/).
+
 ```sh
 docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
 ```
@@ -52,7 +60,15 @@ The same seed reproduces the same path (`path_length_raw`, `path_length_simplifi
 not reproduce the iteration counters: the multilevel planners consume the whole `--time-limit`,
 so vertex, sample and check counts track host speed. `--trace-file` writes a separate JSONL
 stream — one header line, then one frame per interval — described under "Track gate" in
-[ROADMAP.md](ROADMAP.md).
+[ROADMAP.md](ROADMAP.md). Each frame vertex carries `level`, `tree` (`untagged`, `start`,
+`goal`, or `section` for graph vertices in neither tree; planners that do not tag trees report
+`untagged` throughout), `start`/`goal` flags and a full-dimension `q`.
+
+A *traced* run is not byte-reproducible even at a fixed seed: frame capture spends part of the
+wall-clock budget and `getPlannerData` draws from the global RNG, so a `--trace-file` run's path
+fields differ between invocations and from the untraced `--seed 42` numbers. The `.run.json`
+files committed beside the trace fixtures in `docs/traces/` are records of one recording, not
+reproducible targets.
 
 ### Algorithms
 
@@ -131,6 +147,28 @@ cmake --build ompl/build --target ompl -j && sudo cmake --install ompl/build
 ```
 
 The binary lands at `mlmp/build/mlmp`.
+
+## Trace player
+
+[`docs/`](docs/) is a static scrubber page — no build step, no dependencies — that replays the
+committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, and toggles
+bundle levels. Regenerate everything after a planner change:
+
+```sh
+mlmp/tools/recordTraces.sh mlmp:dev                                  # 12 fixtures + scene copies
+python3 mlmp/tools/traceGif.py --scene scene1 --out docs/biqrrt-vs-qrrt.gif
+```
+
+`recordTraces.sh` records each cell at `--seed 42 --time-limit 10 --trace-interval-ms 50`, then
+packs the raw `mlmp.trace/1` stream into the `mlmp.traceviz/1` fixture under `docs/traces/` with
+`mlmp/tools/packTrace.py`. The packing is not cosmetic: every trace frame re-dumps the whole
+planner graph, so a raw 10 s recording is 0.3–0.9 GB, while the packed fixture is under 1.5 MB.
+It stores each vertex once, truncated to the links that vertex's bundle level actually owns —
+the lifted tail above the level is identity-fibre padding that changes every frame — so a frame
+is just a timestamp plus a vertex and edge count.
+
+Re-recording rewrites the `.run.json` files beside the fixtures with new path numbers; traced
+runs are not byte-reproducible (see "Output" above), so that is expected.
 
 ## Experiment harness
 

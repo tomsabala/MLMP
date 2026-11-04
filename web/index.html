@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLMP live planner — bundle-space planning in the browser</title>
+<link rel="stylesheet" href="src/app.css">
+</head>
+<body>
+<header>
+  <h1>MLMP live planner</h1>
+  <p>The same C++ planner the CLI runs, compiled to WebAssembly and solving in a worker. Edit the
+     obstacles, pick a planner, and watch the bundle-space trees grow: colour is tree membership,
+     opacity is bundle level, each dot is one robot's chain tip at that vertex's bundle level, and
+     the solution is drawn as connected green arms.</p>
+</header>
+
+<section class="controls">
+  <label>Scene
+    <select id="scene"></select>
+  </label>
+  <label>Planner
+    <select id="planner">
+      <option value="BiQRRT" selected>BiQRRT</option>
+      <option value="QRRT">QRRT</option>
+      <option value="QRRTStar">QRRTStar</option>
+      <option value="QMP">QMP</option>
+      <option value="QMPStar">QMPStar</option>
+      <option value="RRT">RRT</option>
+      <option value="RRTConnect">RRTConnect</option>
+      <option value="PRMStar" disabled title="unavailable in the browser build: OMPL's PRM requires threads">PRMStar</option>
+      <option value="BITStar">BITStar</option>
+      <option value="AITStar">AITStar</option>
+      <option value="EITStar">EITStar</option>
+      <option value="LBKPIECE">LBKPIECE</option>
+    </select>
+  </label>
+  <label>Budget
+    <input id="time" type="range" min="1" max="10" step="1" value="10">
+    <span id="timeValue" class="counter">10 s</span>
+  </label>
+  <label>Seed
+    <input id="seed" type="number" value="42" step="1">
+  </label>
+  <button id="solve">Solve</button>
+  <label><input id="addObstacle" type="checkbox"> Add obstacle</label>
+  <span id="levels" class="levels"></span>
+  <span id="legend" class="legend"></span>
+</section>
+
+<section class="stage">
+  <figure>
+    <canvas id="canvas" width="640" height="640" tabindex="0"></canvas>
+    <figcaption id="status">loading the planner…</figcaption>
+  </figure>
+  <aside>
+    <h2>Result</h2>
+    <dl id="result"><dt>status</dt><dd>—</dd></dl>
+    <p class="note">Traced in-browser run — frame capture copies the planner graph, so these
+       timings and counters are not benchmark numbers.</p>
+    <p class="note">Drag an obstacle to move it, click points with “Add obstacle” on and press
+       Enter (or double-click) to close a new one, Delete to remove the selected one. Every edit
+       re-solves; only the newest edit is queued.</p>
+  </aside>
+</section>
+
+<footer>
+  <p>Built from <code>Dockerfile.wasm</code>; drawing is shared with the
+     <a href="../">committed-trace player</a>. Source:
+     <a href="https://github.com/tomsabala/MLMP">tomsabala/MLMP</a>.</p>
+</footer>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

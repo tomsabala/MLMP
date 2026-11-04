@@ -1,0 +1,62 @@
+:root { color-scheme: light dark; }
+
+body {
+  margin: 0 auto;
+  padding: 1.25rem;
+  max-width: 1120px;
+  font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+h1 { font-size: 1.3rem; margin: 0 0 .35rem; }
+header p { margin: 0 0 1rem; max-width: 70ch; opacity: .8; }
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem;
+  padding: .6rem .75rem;
+  border: 1px solid rgba(128, 128, 128, .4);
+  border-radius: 6px;
+}
+
+.controls button, .controls select { font: inherit; padding: .15rem .6rem; }
+.controls input[type=range] { flex: 1 1 220px; min-width: 160px; }
+.counter { font-variant-numeric: tabular-nums; opacity: .8; }
+
+.levels, .legend { display: flex; gap: .55rem; align-items: center; }
+.levels label { display: inline-flex; gap: .2rem; align-items: center; }
+
+.legend span { display: inline-flex; gap: .3rem; align-items: center; }
+.swatch {
+  width: .7rem;
+  height: .7rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.panels figure { margin: 0; }
+.panels canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border: 1px solid rgba(128, 128, 128, .4);
+  border-radius: 6px;
+  background: #fff;
+}
+
+figcaption {
+  margin-top: .4rem;
+  font-variant-numeric: tabular-nums;
+  font-size: .88rem;
+  opacity: .85;
+}
+
+footer { margin-top: 1.5rem; font-size: .85rem; opacity: .75; }

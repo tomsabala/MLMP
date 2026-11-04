@@ -32,3 +32,6 @@
 *.app
 .vscode
 build
+
+# Built wasm playground (Dockerfile.wasm --target dist)
+web/dist/

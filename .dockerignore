@@ -3,3 +3,4 @@ mlmp/build/
 .vscode/
 **/__pycache__/
 *.md
+web/dist/

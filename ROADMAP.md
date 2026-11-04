@@ -115,14 +115,79 @@ Line 1 is a header (`schema`, `planner`, `scene`, `seed`, `robots`, `links`,
 `time_limit_s`, `interval_ms`); every later line is a frame:
 
 ```json
-{"frame":7,"t_s":0.35,"vertices":[{"level":0,"component":0,"start":true,"goal":false,"q":[0.1,-0.4]}],"edges":[[0,1]]}
+{"frame":7,"t_s":0.35,"vertices":[
+  {"level":0,"component":1,"tree":"start","start":true,"goal":false,"q":[0.1,-0.4,0.0,0.0]},
+  {"level":0,"component":2,"tree":"goal","start":false,"goal":true,"q":[0.9,1.2,0.0,0.0]}],
+ "edges":[[0,1]]}
 ```
 
-Every vertex carries a full-dimension state: `BundleSpaceSequence::getPlannerData` lifts
-each level's states into the total space and tags them with `setLevel`. `--trace-interval-ms`
-(default 50) and `--trace-max-frames` (default 400) bound the output; hitting the cap sets
-`trace.truncated`. Measured on `scene1`/BiQRRT at a 10 s budget: 197 frames spanning levels
-0–3, every `q` of full dimension 8, `trace.errors` 0.
+(shown wrapped; each frame is one line. `edges` are `[i, j]` index pairs into that frame's own
+`vertices` array.)
+
+`--trace-interval-ms` (default 50) and `--trace-max-frames` (default 400) bound the output;
+hitting the cap sets `trace.truncated`. Measured on the committed `scene1`/BiQRRT recording at
+a 10 s budget: 199 frames spanning levels 0–3, every `q` of full dimension 8, `trace.errors` 0.
+
+**Tree tagging.** `component` is written by `BiQRRTImpl::getPlannerData`, which records
+`firstNew = data.numVertices()` before chaining to the base call and tags only the vertex
+range the base call appends, via `PlannerDataVertexAnnotated::setComponent` — lower levels of
+the sequence are already in `data` and belong to other instances with their own trees. `tree`
+is the string form, produced by `treeLabel` (`mlmp/src/models/run_result.h:91-98`), which is
+the single definition of the vocabulary:
+
+|`component`|`tree`|meaning|
+|---|---|---|
+|0|`untagged`|any planner that does not tag — QRRT emits this for every vertex|
+|1|`start`|start tree|
+|2|`goal`|goal tree|
+|3|`section`|in the graph, in neither tree — mostly `findSection()` configurations, present whether or not the run solved|
+
+No consumer may test a planner name to decide how to colour a vertex; unknown or missing tags
+read as `untagged`. `start` and `goal` are `PlannerData::isStartVertex` / `isGoalVertex` —
+which endpoint a vertex *is*, not which tree it belongs to.
+
+**Every `q` is full dimension, and most of it is padding.** `BundleSpaceSequence::getPlannerData`
+lifts each level's states into the total space, so a frame's `q` is always `robots * links`
+long, interleaved as `q[link * robots + robot]`. But a vertex at bundle level `L` only owns its
+first `L + 1` links per robot; everything above is identity-fibre padding re-derived from the
+planner's current section on every frame. The measured consequence (`mlmp/tools/packTrace.py`
+docstring): the committed `scene1`/QRRT recording holds 193 frames that each re-dump a full `q`
+per graph vertex, and truncating to the owned prefix collapses the whole stream to 15 236
+distinct vertices — the same order as the run's own 15 247 `graph_vertices`, not equal to it
+because distinct prefixes merge states differing only in padding. A renderer that draws the
+untruncated tail renders churn that belongs to no vertex.
+
+**Frames are cumulative snapshots, not deltas.** Each one re-dumps the entire planner graph, so
+a consumer renders the latest frame and drops it. Retaining frames is why a raw 10 s recording
+is 0.3–0.9 GB, which is what `mlmp.traceviz/1` below exists to fix.
+
+CI's "Trace contract" step asserts frame shape, `len(q) == robots * links`, `trace.errors == 0`,
+that both `start` and `goal` appear, and that `untagged` never does for BiQRRT.
+
+Traces recorded before `6974fd6` carry `component == 0` everywhere: `ompl::multilevel` never
+calls `setComponent`, so the field was unused before Track A.
+
+### `mlmp.traceviz/1` — committed fixtures
+
+A raw `mlmp.trace/1` stream (0.3–0.9 GB per 10 s run, because every frame re-dumps the whole
+graph) can neither be committed nor served. `mlmp/tools/packTrace.py` converts one stream plus
+its `mlmp.run/1` object into the form the players read.
+
+Every vertex and edge is stored once, in order of first appearance, each vertex truncated to
+the prefix it owns: `[level, component, …q]`. Each frame is `[t_s, vertexCount, edgeCount]`,
+so frame `k` is exactly `vertices[:nv]` / `edges[:ne]`. Top-level keys: `schema`, `source`,
+`planner`, `scene`, `seed`, `robots`, `links`, `time_limit_s`, `interval_ms`, `tree_codes`,
+`run` (an `mlmp.run/1` subset, for captions), `vertices`, `edges`, `frames`.
+
+Both properties the format relies on — truncation losing nothing a renderer draws, and the
+truncated vertex and edge sets growing append-only — are asserted by `packTrace.py`, which
+exits non-zero rather than silently dropping data.
+
+Measured: 12 fixtures (6 scenes × BiQRRT/QRRT) at 0.74–1.37 MB each, plus their `.run.json`
+siblings, under `docs/traces/`.
+
+A live stream does not need this format. A renderer driven by snapshots can be fed either one,
+which is what keeps a single drawing path for the static page and for Track E.
 
 ---
 
@@ -135,16 +200,31 @@ touch, and what makes it done.
 
 - **Scope.** Consume `mlmp.trace/1`: 10-second looping GIF for the README, and a static
   scrubber page that steps frames, toggles bundle levels, and runs BiQRRT beside QRRT on the
-  same seed. Extend `BiQRRTImpl::getPlannerData` to tag start-tree versus goal-tree
-  membership — today it only chains to the base and logs the two tree sizes, and the generic
-  `component` field does not separate them.
+  same seed.
 - **Requires.** The gate. Nothing else.
 - **Constraints.** No solver in the browser — that is Track E, and conflating them costs
   megabytes. Static JSON on GitHub Pages, no toolchain, no hosting. A traced run is never a
   timing run: frame capture copies the whole graph. The QRRT side-by-side stays unconvincing
-  until Track F lands, since QRRT solved no scene 3/3 at a 10 s budget.
-- **Done when.** The GIF is in the README and the player replays both planners from committed
-  trace files.
+  until Track F lands, since QRRT solved no scene 3/3 at a 10 s budget. The view extents come
+  from the scene and are never renormalised per frame — a renderer that rescales as the cloud
+  grows can be neither scrubbed nor compared.
+- **Shipped** (`track-a/trace-player`, `6974fd6`, `62c0119`): tree tagging in `mlmp.trace/1`
+  and the CI trace contract; `mlmp/tools/recordTraces.sh` (`--seed 42 --time-limit 10
+  --trace-interval-ms 50 --trace-max-frames 400`, raw streams discarded by its `trap`) and
+  `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` and the 5.7 MB README GIF; `docs/` — a
+  dependency-free scrubber page with per-scene BiQRRT-vs-QRRT panels, frame stepping, level
+  toggles and run captions; 12 packed fixtures and 6 scene copies.
+- **Not shipped: the module shape.** `docs/app.js` exports nothing, resolves twelve elements
+  by id (eight in `el` at `:22-31`, four in `panels` at `:33-36`) and does random access over
+  a whole packed fixture, so Track E cannot import it. And nothing committed draws
+  `mlmp.run/1`'s `path` array — the purple on the page is `component == 3`, the `section`
+  vertices, which is a different thing.
+- **Done when.** `web/src/renderer.js` exists (Track E owns it — step 7 of
+  `WASM_PLANNER_PORT_PLAN.md`), `docs/app.js` draws through it, and `showPath` renders the
+  run's solution path. **Done** on `track-e/wasm-browser-planner`: the module ships at
+  `web/src/renderer.js` with a byte-identical committed copy at `docs/renderer.js` (CI runs
+  `cmp` on the pair), `docs/app.js` is a module that imports it, and the two solved runs
+  (`scene1`/`scene5` BiQRRT) now draw their `mlmp.run/1` `path` as connected green arms.
 
 ### Track B — Experiment harness (§2.1–2.4)
 
@@ -193,19 +273,53 @@ touch, and what makes it done.
 - **Requires.** The gate (non-threaded termination, no `program_options` inside `Solver`).
 - **Constraints.** Single-threaded; no COOP/COEP headers available. Boost.Filesystem and
   Boost.Serialization must be cross-compiled or trimmed out of the OMPL build. Measure the
-  compressed payload, do not estimate. Replay is Track A's and must not be rebuilt here.
+  compressed payload, do not estimate.
+- **Constraint: Track E owns `web/src/renderer.js`.** Track A landed page-shaped, not module-
+  shaped, so the module is built here to the contract in `WASM_PLANNER_PORT_PLAN.md` and
+  `docs/app.js` is retrofitted onto it. There is exactly one JS drawing path and one JS
+  forward-kinematics implementation. `mlmp/tools/traceGif.py` keeps a Python copy because it
+  cannot import JS; the two are kept honest by a constant/parity check, not by convention.
+- **Constraint: two forward-kinematics rules, not one.** The renderer truncates to the
+  vertex's level and plots tips only, one dot per robot, because everything above the level is
+  padding. `showPath` uses the untruncated FK and draws whole arms, because `mlmp.run/1`'s
+  `path` entries are real full-dimension configurations.
+- **Constraint: one Pages artifact.** `docs/` is the published Pages site today, and the README
+  links its URL. A Pages workflow added here must publish a single artifact containing both
+  surfaces, or it takes the player offline.
 - **Done when.** A visitor edits a scene, picks a planner, and sees the trees grow, on a
-  static host that sets no special headers.
+  static host that sets no special headers — and the live frames are drawn by the same module
+  the committed fixtures are.
+- **Shipped** (`track-e/wasm-browser-planner`): `Dockerfile.wasm` (static, thread-free,
+  Boost-component-free OMPL 1.7.0 built with `emscripten/emsdk:6.0.13`), `mlmp/src/wasm/entry.cpp`
+  behind an `if(EMSCRIPTEN)` branch in `mlmp/CMakeLists.txt`, the `web/` playground (module
+  worker + obstacle editor + newest-edit solve queue), `web/src/renderer.js` with its verified
+  `docs/renderer.js` copy, a `wasm` CI job and `pages.yml` publishing `docs/` with the
+  playground at `/live/`.
+- **Measured, not estimated.** Payload `gzip -9`: `mlmp.wasm` 454 511 B + `mlmp.mjs` 22 278 B =
+  476 789 B, 9.1% of the 5 MiB gate. Throughput on one host, traced BiQRRT/`scene1`/seed 42/10 s:
+  native 8 104 vertices and 23 221 samples versus wasm 5 379 and 14 982 — wasm runs at ≈0.65×
+  native. First exact solution 0.10 s native versus 0.9–1.8 s in the browser, which is why the
+  budget slider defaults to 10 s: at 5 s the browser run times out on `scene1`.
+- **Found while building it: a traced multilevel run is not seed-reproducible.** `captureFrame`
+  calls `BundleSpaceSequence::getPlannerData`, whose path-restriction code draws from the global
+  RNG, and captures land on wall-clock boundaries — so the number of draws tracks host speed and
+  `path_length_raw` varies run to run. Untraced runs repeat exactly (verified in both targets).
+  `solveScene` therefore installs no trace sink when given no callback, and both determinism
+  gates compare untraced runs. Track B must not enable `--trace-file` on measurement runs.
 
 ### Track F — Planner hygiene (§2.5)
 
 - **Scope.** Make `maxDistance_` a declared `Planner::declareParam` with a `SelfConfig`-derived
-  default instead of the hardcoded `0.1` at `BiQRRTImpl.cpp:29`, and answer whether the
+  default instead of the hardcoded `0.1` at `BiQRRTImpl.cpp:32`, and answer whether the
   BiQRRT/QRRT gap is real or a step-size artefact (QRRT's `SelfConfig` default logged as
   1.78–3.55 across `scene1`'s levels).
 - **Requires.** The gate. The raw-versus-simplified half of §2.5 is already delivered by it.
 - **Constraints.** Must land before Track B's campaign. The new default changes BiQRRT
-  behaviour, so re-measure the CI solve gate (`scene1`, 3/3 at 10 s) before merging.
+  behaviour, so re-measure the CI solve gate (`scene1`, 3/3 at 10 s) before merging. It also
+  invalidates the committed fixtures and the README GIF, which are recordings of planner
+  behaviour and not derived artefacts: re-recording is `mlmp/tools/recordTraces.sh` followed by
+  `mlmp/tools/traceGif.py`, and nothing else. Today's QRRT panels are honest failures — a
+  timeout and one grey untagged cloud — and stay that way until this track lands.
 - **Done when.** The step size is a parameter with a scale-derived default and the gap has a
   measured explanation.
 
@@ -215,24 +329,32 @@ The gate precedes A, B, E and F. Track F precedes Track B's full campaign. The c
 precedes Phase 3, and Phase 3 precedes Phase 4 — learned sampling without rigorous baselines
 is an unfalsifiable claim, which is the whole reason Phase 2 exists.
 
+Two edges were added by Track A's handoff. Track E's `web/src/renderer.js` precedes Track A's
+retrofit of `docs/app.js`, which is the reverse of the original dependency. And a
+Pages-publishing workflow in Track E precedes nothing, but must not land without also
+publishing `docs/` — a repository has one Pages source.
+
 ---
 
 ## Phase 1 — Visualize the bundle hierarchy
 
 The data already exists in `BiQRRTImpl::getPlannerData`.
 
-- Dump planner data per iteration (vertices, edges, tree membership, bundle level).
-- Animate: both trees growing from start and goal, bundle levels stacked so the coarse
-  level visibly solves first and then **restricts** the fine level's sampling, and the
-  frame where the two trees connect and the path collapses out.
-- Side-by-side with QRRT on the same scene and seed — the bidirectional advantage becomes
-  something you can see rather than something a table asserts.
-- 10-second looping GIF at the top of the README.
-- **A trace player**, which is the GIF with a scrubber. The per-iteration dump above is the
-  whole input: a static page replays it, steps frame by frame, toggles bundle levels, and runs
-  BiQRRT and QRRT side by side on the same seed. No solver in the browser, so it is a few
-  hundred KB of JSON on GitHub Pages with no toolchain and no hosting requirements. Running the
-  planner live in the browser is Phase 6 and costs vastly more; do not conflate them.
+**Delivered** (`track-a/trace-player`): the per-iteration dump, by the gate; tree membership
+and bundle level in every frame (`6974fd6`); the side-by-side page with BiQRRT and QRRT on the
+same scene and seed; the 10-second looping GIF at the top of the README; the scrubber that
+steps frame by frame and toggles bundle levels.
+
+**Outstanding**: the solution path drawn from `mlmp.run/1`, which nothing committed renders;
+the renderer as a module shared with Track E rather than a page script; and the animation's
+stacked-levels reading of the hierarchy — the coarse level solving first and then
+*restricting* the fine level's sampling — which is visible in the scrubber but is not what the
+GIF narrates. The side-by-side also stays unconvincing until Track F lands, since QRRT solves
+no scene at a 10 s budget.
+
+No solver in the browser, so it is static JSON on GitHub Pages with no toolchain and no
+hosting requirements. Running the planner live in the browser is Phase 6 and costs vastly
+more; do not conflate them.
 
 Multilevel planning is genuinely beautiful and almost nobody renders the bundle hierarchy.
 

@@ -28,6 +28,12 @@ everything else is header-only. A bare scene name (`scene1.json`) resolves again
 `mlmp/tools/plotScene.py` renders scenes with matplotlib. It reads `../src/inputs/experiment/`, so run
 it from `mlmp/tools/`.
 
+`docs/` is a dependency-free trace player (`docs/app.js`) over 12 committed `mlmp.traceviz/1`
+fixtures in `docs/traces/`, plus the README GIF. `mlmp/tools/recordTraces.sh` re-records them
+through the Docker image and `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` renders the GIF
+from the committed fixtures alone. A traced run is not byte-reproducible, so the `.run.json`
+files beside the fixtures are records of one recording, not pinned targets.
+
 ## Tests
 
 There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs against the Docker image:
@@ -35,7 +41,11 @@ There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs
 2. **Solve**: BiQRRT must solve `scene1.json` within 10 s.
 3. **Contract/determinism**: two `--seed 42` runs must produce identical `path_length_raw` and
    `path_length_simplified`, along with schema assertions.
-4. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
+4. **Trace contract**: a 3 s `--trace-file` BiQRRT run must exit 0 or 1 (3 s is below the solve
+   budget), and its JSONL must carry an `mlmp.trace/1` header, `len(q) == robots * links` on
+   every vertex, `trace.errors == 0`, `trace.frames` matching the line count, both `start` and
+   `goal` among the `tree` labels, and no `untagged` vertex.
+5. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
 
 To check a change locally, rebuild the image and run those same `docker run` commands. Only BiQRRT gates
 the solve check, because QRRT doesn't solve any scene reliably. Expect `scene4`/`scene6` to exit 1.
@@ -80,9 +90,14 @@ padded bounding box. Scene JSON angles are integer degrees, converted to radians
   lambda, on the planner thread.
 - **Seed before any OMPL object exists.** `ompl::RNG::setSeed` runs in `main` before `Scene`/`Solver`,
   because `KinematicChainProjector`'s constructor draws from the global RNG.
-- **Seed reproducibility covers path fields only.** Multilevel planners use the whole time budget, so
-  vertex, sample, and check counters follow host speed. `CountingStateSampler` forwards to the default
-  sampler so that counting doesn't change the RNG sequence.
+- **Seed reproducibility covers path fields only, and only for an untraced run.** Multilevel planners
+  use the whole time budget, so vertex, sample, and check counters follow host speed.
+  `CountingStateSampler` forwards to the default sampler so that counting doesn't change the RNG
+  sequence. Tracing does change it: `captureFrame` calls `BundleSpaceSequence::getPlannerData`, whose
+  path-restriction code draws from the global RNG, and captures land on wall-clock boundaries — so a
+  traced multilevel run consumes a host-speed-dependent number of draws and its `path_length_raw` is
+  not reproducible. Both determinism gates (`ci.yml`, `web/test/smoke.mjs`) therefore compare untraced
+  runs.
 - **Counters are plain `uint64_t` in `RunCounters`**, since everything is single-threaded. Every level's
   space and checker must be wired to the same `counters_` (use `makeChainSpace`). `solve()` resets
   counters and level handles so it can be called more than once.
