@@ -28,6 +28,12 @@ everything else is header-only. A bare scene name (`scene1.json`) resolves again
 `mlmp/tools/plotScene.py` renders scenes with matplotlib. It reads `../src/inputs/experiment/`, so run
 it from `mlmp/tools/`.
 
+`docs/` is a dependency-free trace player (`docs/app.js`) over 12 committed `mlmp.traceviz/1`
+fixtures in `docs/traces/`, plus the README GIF. `mlmp/tools/recordTraces.sh` re-records them
+through the Docker image and `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` renders the GIF
+from the committed fixtures alone. A traced run is not byte-reproducible, so the `.run.json`
+files beside the fixtures are records of one recording, not pinned targets.
+
 ## Tests
 
 There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs against the Docker image:
@@ -35,7 +41,11 @@ There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs
 2. **Solve**: BiQRRT must solve `scene1.json` within 10 s.
 3. **Contract/determinism**: two `--seed 42` runs must produce identical `path_length_raw` and
    `path_length_simplified`, along with schema assertions.
-4. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
+4. **Trace contract**: a 3 s `--trace-file` BiQRRT run must exit 0 or 1 (3 s is below the solve
+   budget), and its JSONL must carry an `mlmp.trace/1` header, `len(q) == robots * links` on
+   every vertex, `trace.errors == 0`, `trace.frames` matching the line count, both `start` and
+   `goal` among the `tree` labels, and no `untagged` vertex.
+5. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
 
 To check a change locally, rebuild the image and run those same `docker run` commands. Only BiQRRT gates
 the solve check, because QRRT doesn't solve any scene reliably. Expect `scene4`/`scene6` to exit 1.
