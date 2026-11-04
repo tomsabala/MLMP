@@ -119,7 +119,10 @@ function buildLevelToggles(links) {
 
 function buildLegend() {
   el.legend.textContent = '';
-  for (const [name, color] of Object.entries(TREE_COLORS)) {
+  /* TREE_COLORS covers the graph's component tags only; showPath draws the run's solution in
+   * PATH_COLOR, which would otherwise be missing from the legend entirely. */
+  const entries = [...Object.entries(TREE_COLORS), ['solution path', PATH_COLOR]];
+  for (const [name, color] of entries) {
     const item = document.createElement('span');
     const swatch = document.createElement('span');
     swatch.className = 'swatch';

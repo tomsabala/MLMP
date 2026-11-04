@@ -80,7 +80,7 @@ assert.equal(robots, 2);
 /* 5. Tag vocabulary mirrors treeLabel (mlmp/src/models/run_result.h:91-98), and the committed
  *    fixtures' own tree_codes map must agree with it. */
 {
-  assert.deepEqual(TREE_CODES, { 0: 'untagged', 1: 'start', 2: 'goal', 3: 'path' });
+  assert.deepEqual(TREE_CODES, { 0: 'untagged', 1: 'start', 2: 'goal', 3: 'section' });
   const packed = JSON.parse(
     readFileSync(new URL('../../docs/traces/scene1-biqrrt.json', import.meta.url))
   );

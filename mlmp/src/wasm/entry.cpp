@@ -6,6 +6,7 @@
  *
  * The call is synchronous and blocking for the whole time budget, which is why the page runs it
  * inside a Worker. */
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -32,26 +33,45 @@ std::string solveScene(std::string scenePath, std::string algo, double timeLimit
      * logging off the CLI's stdout contract, and there is no stdout contract here. */
     ompl::msg::setLogLevel(ompl::msg::LOG_NONE);
 
-    if (algo == "PRMStar") {
+    if (mlmp::kThreadedAlgorithms.count(algo) > 0) {
         return mlmp::errorJson("usage",
-                               "PRMStar is unavailable in the browser build: "
-                               "ompl::geometric::PRM::solve requires threads")
+                               algo + " is unavailable in the browser build: "
+                                      "its solve() requires threads")
             .dump();
     }
     if (!mlmp::isSupportedAlgorithm(algo)) {
         return mlmp::errorJson("usage", "unknown algorithm: " + algo).dump();
     }
 
+    /* Every JS number reaches C++ as a double, and the page's seed and time inputs are
+     * user-editable, so nonsense values are reachable. Reject them here: an out-of-range seed
+     * would silently become a microsecond-clock seed, and a NaN budget would serialise
+     * "time_limit_s": null into the frozen schema. */
+    if (!std::isfinite(seed) || seed != std::floor(seed) || seed < 1.0 || seed > 4294967295.0) {
+        return mlmp::errorJson("usage", "seed must be an integer in [1, 4294967295]").dump();
+    }
+    if (!std::isfinite(timeLimitS) || timeLimitS <= 0.0) {
+        return mlmp::errorJson("usage", "time limit must be a finite positive number").dump();
+    }
+    const bool tracing = !onFrame.isUndefined() && !onFrame.isNull();
+    if (tracing && (!std::isfinite(traceIntervalS) || traceIntervalS <= 0.0)) {
+        return mlmp::errorJson("usage", "trace interval must be a finite positive number")
+            .dump();
+    }
+
     /* Before any OMPL object exists, exactly as main.cpp does: KinematicChainProjector's
      * constructor draws from the global generator. The Worker is long-lived and the RNG is
      * process-global, so re-seeding per call is what makes solve N reproducible. */
-    ompl::RNG::setSeed(static_cast<std::uint_fast32_t>(seed));
+    const auto appliedSeed = static_cast<std::uint_fast32_t>(seed);
+    ompl::RNG::setSeed(appliedSeed);
 
     mlmp::Scene scene;
     try {
         scene.loadScene(scenePath);
     } catch (const std::exception& e) {
         return mlmp::errorJson("io", e.what()).dump();
+    } catch (...) {
+        return mlmp::errorJson("runtime", "unknown exception").dump();
     }
 
     mlmp::RunOptions options;
@@ -72,7 +92,7 @@ std::string solveScene(std::string scenePath, std::string algo, double timeLimit
      * number of random draws and is not seed-reproducible; an untraced one is (measured:
      * BiQRRT/scene1/seed 42 repeats path_length_raw exactly while its vertex count varies).
      */
-    if (!onFrame.isUndefined() && !onFrame.isNull()) {
+    if (tracing) {
         options.traceSink = [&onFrame](const mlmp::Json& frame) { onFrame(frame.dump()); };
     }
 
@@ -82,9 +102,17 @@ std::string solveScene(std::string scenePath, std::string algo, double timeLimit
          * reach an existing instance. */
         mlmp::Solver solver(scene);
         const mlmp::RunResult result = solver.solve(options);
-        return mlmp::toJson(result).dump();
+        /* ompl::RNG::setSeed records firstSeed_ only on the process's first call, and this
+         * module outlives every solve, so result.seed carries call 1's seed from call 2 onward.
+         * The key already exists, so overriding it preserves ordered_json's key order and the
+         * frozen mlmp.run/1 contract. */
+        mlmp::Json out = mlmp::toJson(result);
+        out["seed"] = static_cast<std::uint64_t>(appliedSeed);
+        return out.dump();
     } catch (const std::exception& e) {
         return mlmp::errorJson("runtime", e.what()).dump();
+    } catch (...) {
+        return mlmp::errorJson("runtime", "unknown exception").dump();
     }
 }
 

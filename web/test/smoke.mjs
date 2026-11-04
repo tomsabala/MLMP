@@ -66,21 +66,24 @@ assert.equal(failed, 0, 'at least one planner failed to run in wasm');
   assert.equal(result.links, 4);
 }
 
+/* A traced run spends a large share of its budget on frame capture and JSON.parse, charged to
+ * the planner's own thread, so whether it solves within 10 s is host-speed dependent — the same
+ * reason ci.yml's native trace step accepts exit 0 or 1. Solve success is proven by the
+ * untraced block below; this block proves the trace plumbing. */
 let frames = 0;
 const traced = solve('BiQRRT', 10, 42, () => {
   frames++;
 });
-assert.equal(traced.solved, true, traced.status);
-assert.equal(traced.exact, true, traced.status);
 assert.equal(traced.seed, 42, String(traced.seed));
-assert.ok(traced.path_length_raw > 0, String(traced.path_length_raw));
 assert.ok(frames > 0, 'no trace frame reached the callback');
 assert.equal(traced.trace.frames, frames, `${traced.trace.frames} vs ${frames}`);
-assert.equal(traced.path.length, traced.path_states);
-assert.equal(traced.path[0].length, traced.robots * traced.links);
+if (traced.solved) {
+  assert.equal(traced.path.length, traced.path_states);
+  assert.equal(traced.path[0].length, traced.robots * traced.links);
+}
 console.log(
-  `ok   BiQRRT solved scene1 in ${traced.time_first_solution_s?.toFixed(3)} s ` +
-    `(len ${traced.path_length_raw.toFixed(3)}, ${frames} frames)`
+  `ok   BiQRRT traced scene1: ${frames} frames, status ${traced.status}` +
+    (traced.solved ? `, len ${traced.path_length_raw.toFixed(3)}` : '')
 );
 
 /* Seed reproducibility covers path fields, and only for an untraced run: capturing a frame
@@ -100,4 +103,24 @@ console.log(
   `ok   two untraced seed-42 runs agree: raw ${a.path_length_raw.toFixed(6)}, ` +
     `simplified ${a.path_length_simplified.toFixed(6)}`
 );
+
+/* The reported seed must be the seed that was applied. ompl::RNG::setSeed records firstSeed_
+ * only on the process's first call and this module outlives every solve, so before entry.cpp
+ * overrode the field, every run after the first advertised run 1's seed. */
+const seeded = solve('BiQRRT', 2, 7);
+assert.equal(seeded.seed, 7, String(seeded.seed));
+console.log(`ok   a later solve reports its own seed (${seeded.seed})`);
+
+/* Nonsense inputs are reachable from the page's number fields: they must come back as usage
+ * errors rather than a microsecond-clock seed or a null time_limit_s in the frozen schema. */
+for (const seed of [0, -1, NaN, 1.5, 4294967301]) {
+  const result = solve('BiQRRT', 2, seed);
+  assert.equal(result.error?.kind, 'usage', `seed ${seed}: ${JSON.stringify(result)}`);
+}
+{
+  const result = solve('BiQRRT', NaN, 42);
+  assert.equal(result.error?.kind, 'usage', JSON.stringify(result));
+}
+console.log('ok   invalid seed and time limit rejected as usage errors');
+
 console.log('smoke.mjs: all checks ok');

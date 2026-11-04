@@ -50,12 +50,17 @@ using namespace ompl::base;
 
 namespace mlmp {
 
-/* The supported planner set. These two sets are the single source of truth:
+/* The supported planner set. These sets are the single source of truth:
  * the CLI validates against them and Solver::buildPlanner dispatches on them. */
 inline const std::set<std::string> kMultilevelAlgorithms = {
     "BiQRRT", "QRRT", "QRRTStar", "QMP", "QMPStar"};
 inline const std::set<std::string> kSingleLevelAlgorithms = {
     "RRT", "RRTConnect", "PRMStar", "BITStar", "AITStar", "EITStar", "LBKPIECE"};
+
+/* Planners whose solve() spawns a std::thread. They work on the native CLI and abort in a
+ * browser build, so the wasm entry point rejects them up front; it tests membership here
+ * rather than comparing a literal, so adding a threaded planner above cannot bypass it. */
+inline const std::set<std::string> kThreadedAlgorithms = {"PRMStar"};
 
 inline bool isSupportedAlgorithm(const std::string& algo) {
     return kMultilevelAlgorithms.count(algo) > 0 || kSingleLevelAlgorithms.count(algo) > 0;

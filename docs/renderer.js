@@ -15,16 +15,20 @@
 export const TREE_COLORS = {
   start: '#1f77b4',
   goal: '#d62728',
-  path: '#2ca02c',
+  section: '#9467bd',
   untagged: '#7f7f7f',
 };
+/* Not a tree code: the returned mlmp.run/1 `path`, drawn as whole arms by drawPath. It is kept
+ * out of TREE_COLORS because that map must stay equal to traceGif.py's palette, which colours
+ * component tags only. */
+export const PATH_COLOR = '#2ca02c';
 export const PADDING = 0.05;
 
 /* The JS mirror of treeLabel (mlmp/src/models/run_result.h:91-98) — the component tag a
  * BundleSpaceGraph writes per vertex. A packed fixture carries an identical `tree_codes` map by
  * construction; it is ignored in favour of this one so there is a single definition. Never infer
  * a tree from the planner name. */
-export const TREE_CODES = { 0: 'untagged', 1: 'start', 2: 'goal', 3: 'path' };
+export const TREE_CODES = { 0: 'untagged', 1: 'start', 2: 'goal', 3: 'section' };
 
 export function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -260,13 +264,13 @@ export function createTracePlayer({ canvas, scene } = {}) {
       }
     }
 
-    /* `path` last so the lifted solution stays legible on top of both trees. */
-    for (const pathLayer of [false, true]) {
+    /* `section` last so those configurations stay legible on top of both trees. */
+    for (const sectionLayer of [false, true]) {
       for (let i = 0; i < vertexCount && i < vertices.length; i++) {
         const v = deriveVertex(i);
-        if (!visible(v.level) || (v.tree === 'path') !== pathLayer) continue;
+        if (!visible(v.level) || (v.tree === 'section') !== sectionLayer) continue;
         ctx.fillStyle = hexToRgba(TREE_COLORS[v.tree] || TREE_COLORS.untagged, v.alpha);
-        const radius = v.tree === 'path' ? 2.4 : 1.5;
+        const radius = v.tree === 'section' ? 2.4 : 1.5;
         for (const [x, y] of v.tips) {
           const [px, py] = project(x, y);
           ctx.beginPath();
@@ -277,12 +281,12 @@ export function createTracePlayer({ canvas, scene } = {}) {
     }
   }
 
-  /* The solution drawn as whole arms: same green as a `path`-tagged vertex, different shape.
-   * Both are "the solution"; connected arms versus scattered dots is the distinction. */
+  /* The returned solution drawn as whole arms, in its own green: connected arms versus the
+   * scattered dots of the graph's component tags. */
   function drawPath(ctx, project) {
     ctx.lineWidth = 2;
-    ctx.strokeStyle = hexToRgba(TREE_COLORS.path, 0.9);
-    ctx.fillStyle = hexToRgba(TREE_COLORS.path, 0.9);
+    ctx.strokeStyle = hexToRgba(PATH_COLOR, 0.9);
+    ctx.fillStyle = hexToRgba(PATH_COLOR, 0.9);
     for (const q of path) {
       for (let r = 0; r < robots; r++) {
         const robot = sceneData.robots[r];
