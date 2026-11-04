@@ -22,6 +22,8 @@ const el = {
   addObstacle: document.getElementById('addObstacle'),
   levels: document.getElementById('levels'),
   legend: document.getElementById('legend'),
+  view: document.getElementById('view'),
+  treeSource: document.getElementById('treeSource'),
   canvas: document.getElementById('canvas'),
   status: document.getElementById('status'),
   result: document.getElementById('result'),
@@ -31,6 +33,9 @@ const state = {
   player: null,
   editor: null,
   levels: new Set(),
+  /* legend entry name -> its <span>, so a redraw can dim the colours this run has none of. */
+  legend: new Map(),
+  hasPath: false,
   ready: false,
   /* Only the newest edit survives: `inFlight` is the id the worker is solving, `pending` the one
    * scene waiting for it. Dragging stays live while a solve runs, which is the point of queueing
@@ -123,8 +128,10 @@ function renderResult(result) {
       ['error', result.error.kind],
       ['message', result.error.message],
     ]);
+    state.hasPath = false;
     state.player.showPath(null);
     state.player.redraw();
+    syncLabels();
     return;
   }
 
@@ -143,10 +150,19 @@ function renderResult(result) {
         ? `${result.trace.frames} frames · truncated ${result.trace.truncated} · errors ${result.trace.errors}`
         : 'none',
     ],
+    /* Not a mlmp.run/1 field: the frames carry tree_source, and the player keeps the last one
+     * it was handed. A planner that tags nothing gets its start/goal split derived from the
+     * graph's connectivity in solver.h, and the reader has to know which they are looking at. */
+    [
+      'trees',
+      state.player.treeSource === 'derived' ? 'derived from connectivity' : 'planner-reported',
+    ],
   ]);
 
+  state.hasPath = Boolean(result.solved && result.path && result.path.length > 0);
   state.player.showPath(result.solved ? result.path : null);
   state.player.redraw();
+  syncLabels();
   state.editor.drawOverlay();
 }
 
@@ -173,7 +189,9 @@ function startSolve(message) {
   state.inFlight = message.id;
   state.pending = null;
   setStatus(`solving ${message.algo} for ${message.timeLimitS} s…`);
+  state.hasPath = false;
   state.player.reset();
+  syncLabels();
   worker.postMessage(message);
 }
 
@@ -222,6 +240,7 @@ function onWorkerMessage(event) {
   if (msg.id !== state.inFlight) return; // a superseded run's tail
   if (msg.type === 'frame') {
     state.player.pushFrame(msg.frame);
+    syncLabels();
     state.editor.drawOverlay();
     return;
   }
@@ -249,6 +268,7 @@ function buildLevelToggles(links) {
       else state.levels.delete(i);
       state.player.setLevels(state.levels);
       state.player.redraw();
+      syncLabels();
       state.editor.drawOverlay();
     });
     label.appendChild(box);
@@ -260,6 +280,7 @@ function buildLevelToggles(links) {
 
 function buildLegend() {
   el.legend.textContent = '';
+  state.legend = new Map();
   /* TREE_COLORS covers the graph's component tags only; the returned solution is drawn in
    * PATH_COLOR and would otherwise be missing from the legend entirely. */
   const entries = [...Object.entries(TREE_COLORS), ['solution path', PATH_COLOR]];
@@ -271,7 +292,32 @@ function buildLegend() {
     item.appendChild(swatch);
     item.appendChild(document.createTextNode(name));
     el.legend.appendChild(item);
+    state.legend.set(name, item);
   }
+}
+
+/* Run after every redraw. A colour the current frame has none of is dimmed rather than removed,
+ * so the reader can tell "this run produced no goal tree" from "this page cannot show one"; and
+ * the caption states whether the start/goal split is the planner's own tagging or labels
+ * solver.h derived from graph connectivity. */
+function syncLabels() {
+  if (!state.player) return;
+  const counts = state.player.treeCounts();
+  for (const [name, item] of state.legend) {
+    const empty = name === 'solution path' ? !state.hasPath : counts[name] === 0;
+    item.classList.toggle('dim', empty);
+  }
+  /* Derivation can only follow edges the planner publishes, and some publish almost none:
+   * EITStar reports 28 302 vertices with 120 edges and flags no start or goal vertex at all, so
+   * nothing is reachable from an endpoint and every vertex stays untagged. Saying "derived"
+   * there without saying it found nothing is how the grey hairball looked like a bug. */
+  const labelled = counts.start + counts.goal + counts.section;
+  el.treeSource.textContent =
+    state.player.treeSource === 'derived'
+      ? labelled > 0
+        ? 'trees: derived from graph connectivity — this planner tags none of its own'
+        : 'trees: none — this planner publishes no graph edges reaching the start or goal'
+      : 'trees: reported by the planner';
 }
 
 async function loadJson(url) {
@@ -287,8 +333,11 @@ async function loadScene(name) {
   if (state.editor) state.editor.setScene(scene);
   else state.editor = createSceneEditor({ canvas: el.canvas, player: state.player, scene });
   state.editor.setAddMode(el.addObstacle.checked);
+  state.player.setViewMode(el.view.value);
+  state.hasPath = false;
   buildLevelToggles(scene.metadata.n);
   state.player.redraw();
+  syncLabels();
   showResult([['status', '—']]);
   syncSolveEnabled();
   setStatus(state.ready ? `${name} loaded` : 'loading the planner…');
@@ -313,6 +362,13 @@ el.solve.addEventListener('click', () => {
 });
 el.addObstacle.addEventListener('change', () => state.editor.setAddMode(el.addObstacle.checked));
 el.planner.addEventListener('change', cancelInFlight);
+el.view.addEventListener('change', () => {
+  if (!state.player) return;
+  state.player.setViewMode(el.view.value);
+  state.player.redraw();
+  syncLabels();
+  if (state.editor) state.editor.drawOverlay();
+});
 el.scene.addEventListener('change', () => {
   /* Cancel before the scene swaps: a surviving frame from the old run would be drawn with the
    * new scene's stride and pins (robots and links differ across the committed scenes). */

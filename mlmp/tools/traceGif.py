@@ -9,6 +9,13 @@ kinematics follow KinematicChainValidityChecker (mlmp/src/state/kinematic_chain.
 cumulative angles, index q[link*robots+robot], one constant jointLength per robot. A fixture
 vertex at bundle level L stores only its first L+1 links per robot — the tail above L is
 identity-fibre padding, not planner output, and is never drawn.
+
+Colour comes from the vertex's tree NAME, never from the planner name. BiQRRT tags its own
+trees; for every other planner the binary derives start/goal from graph connectivity, and the
+fixture records which of the two in its top-level "tree_source". Fixtures packed before
+derivation existed carry no "tree_source" and leave every non-BiQRRT vertex at component 0,
+so their panel renders in the single untagged grey — re-record with a current image to get a
+blue start tree and a red goal tree on that side.
 """
 import argparse
 import json

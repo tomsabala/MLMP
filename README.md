@@ -5,8 +5,11 @@
 Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
 seed: blue is the start tree, red the goal tree, purple the graph vertices in neither tree —
 mostly the configurations `findSection()` produces, which exist whether or not the run solved —
-and opacity is the bundle level. Step it frame by frame, pick another scene and toggle
-levels in the [trace player](https://tomsabala.github.io/MLMP/).
+and opacity is the bundle level. `BiQRRT` tags its own trees; every other planner tags
+nothing, so the binary derives the same `start`/`goal` labels from graph connectivity and each
+frame records which of the two it is. Step it frame by frame, pick another scene, switch
+between graph, vertices and path views and toggle levels in the
+[trace player](https://tomsabala.github.io/MLMP/).
 
 ```sh
 docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
@@ -47,6 +50,11 @@ A run prints exactly one `mlmp.run/1` JSON object on stdout; every log line goes
 `graph_edges`, `state_validity_checks`, `states_sampled`, `motion_checks`,
 `motion_checks_valid` and `trace`.
 
+`path` is the *simplified* path — the solver runs `simplifyMax` on the solution in place
+before exporting the states, so `path` matches `path_length_simplified`, not
+`path_length_raw`. `--no-simplify` skips that step, and then `path` is the raw path and
+`path_length_simplified` is `null`.
+
 A failure instead prints `{"schema":"mlmp.run/1","error":{"kind":…,"message":…}}` and exits 2,
 where `kind` is `usage` (bad flags or unknown algorithm), `io` (scene or trace file unreadable)
 or `runtime`. No stdout at all means the process crashed.
@@ -60,9 +68,13 @@ The same seed reproduces the same path (`path_length_raw`, `path_length_simplifi
 not reproduce the iteration counters: the multilevel planners consume the whole `--time-limit`,
 so vertex, sample and check counts track host speed. `--trace-file` writes a separate JSONL
 stream — one header line, then one frame per interval — described under "Track gate" in
-[ROADMAP.md](ROADMAP.md). Each frame vertex carries `level`, `tree` (`untagged`, `start`,
-`goal`, or `section` for graph vertices in neither tree; planners that do not tag trees report
-`untagged` throughout), `start`/`goal` flags and a full-dimension `q`.
+[ROADMAP.md](ROADMAP.md). Each frame carries `tree_source` (`planner` or `derived`) and one
+entry per graph vertex with `level`, `tree` (`untagged`, `start`, `goal`, or `section` for
+graph vertices in neither tree), `start`/`goal` flags and a full-dimension `q`. Planners that
+do not tag their own trees — everything except `BiQRRT` — get `start`/`goal` derived by a
+breadth-first search from the run's start and goal vertices over the frame's own edges, and
+report `tree_source: "derived"`; vertices that neither endpoint reaches stay `untagged`, and
+`section` is never derived.
 
 A *traced* run is not byte-reproducible even at a fixed seed: frame capture spends part of the
 wall-clock budget and `getPlannerData` draws from the global RNG, so a `--trace-file` run's path
@@ -151,8 +163,11 @@ The binary lands at `mlmp/build/mlmp`.
 ## Trace player
 
 [`docs/`](docs/) is a static scrubber page — no build step, no dependencies — that replays the
-committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, and toggles
-bundle levels. Regenerate everything after a planner change:
+committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, toggles
+bundle levels, and switches each panel between `graph + edges`, `vertices only` and
+`path only`. Each panel's caption says whether its tree colours were reported by the planner
+or derived from graph connectivity, because the two panels can disagree: BiQRRT reports, QRRT
+is derived. Regenerate everything after a planner change:
 
 ```sh
 mlmp/tools/recordTraces.sh mlmp:dev                                  # 12 fixtures + scene copies
@@ -166,6 +181,10 @@ planner graph, so a raw 10 s recording is 0.3–0.9 GB, while the packed fixture
 It stores each vertex once, truncated to the links that vertex's bundle level actually owns —
 the lifted tail above the level is identity-fibre padding that changes every frame — so a frame
 is just a timestamp plus a vertex and edge count.
+
+All 12 committed fixtures — and the GIF above — were recorded with a derivation-capable image,
+so the BiQRRT half carries the planner's own tags (`"tree_source": "planner"`) and the QRRT half
+the labels `captureFrame` derived from graph connectivity (`"derived"`).
 
 Re-recording rewrites the `.run.json` files beside the fixtures with new path numbers; traced
 runs are not byte-reproducible (see "Output" above), so that is expected.

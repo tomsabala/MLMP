@@ -12,7 +12,9 @@
   <p>The same C++ planner the CLI runs, compiled to WebAssembly and solving in a worker. Edit the
      obstacles, pick a planner, and watch the bundle-space trees grow: colour is tree membership,
      opacity is bundle level, each dot is one robot's chain tip at that vertex's bundle level, and
-     the solution is drawn as connected green arms.</p>
+     the solution is drawn in green as each robot's tip trajectory between its start and goal
+     arms. Switch the view to <em>vertices only</em> or <em>path only</em> when the edge web
+     hides the result.</p>
 </header>
 
 <section class="controls">
@@ -44,8 +46,16 @@
   </label>
   <button id="solve">Solve</button>
   <label><input id="addObstacle" type="checkbox"> Add obstacle</label>
+  <label>View
+    <select id="view">
+      <option value="graph" selected>graph + edges</option>
+      <option value="vertices">vertices only</option>
+      <option value="path">path only</option>
+    </select>
+  </label>
   <span id="levels" class="levels"></span>
   <span id="legend" class="legend"></span>
+  <span id="treeSource" class="source">trees: reported by the planner</span>
 </section>
 
 <section class="stage">

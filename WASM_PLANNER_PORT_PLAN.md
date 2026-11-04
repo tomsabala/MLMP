@@ -40,8 +40,8 @@ the five deltas below were forced by things only a build reveals.
 
 Build an Emscripten/wasm port of `mlmp` so a visitor on a static host (GitHub Pages, no
 COOP/COEP headers) can edit a 2D scene, pick a planner, solve, and watch the bundle-space
-trees grow live. Goal defined by `ROADMAP.md:263-285` (Track E card) and
-`ROADMAP.md:468-500` (Phase 6 body).
+trees grow live. Goal defined by `ROADMAP.md:313-338` (Track E card) and
+`ROADMAP.md:538-570` (Phase 6 body).
 
 The `Solver` contract gate is already landed and is what makes this possible:
 `mlmp::Solver::solve(const RunOptions&) -> RunResult` (`mlmp/src/models/solver.h:136`)
@@ -71,7 +71,7 @@ the Docker image, `mlmp.run/1` and `mlmp.trace/1` are unchanged.
 - **Boost.Serialization *headers* are unavoidable.** `base/PlannerData.h:48` includes
   `boost/serialization/access.hpp`, `multilevel/datastructures/PlannerDataVertexAnnotated.h:42`
   includes `boost/serialization/export.hpp`, and `Solver` uses both types
-  (`solver.h:257,383,397`). Headers must be on the include path; the compiled libraries
+  (`solver.h:285,536,561`). Headers must be on the include path; the compiled libraries
   must not be linked. Only `base/src/PlannerDataStorage.cpp`, `base/src/StateStorage.cpp`,
   `tools/lightning/src/LightningDB.cpp` and `tools/thunder/src/ThunderDB.cpp` reference
   them, none reachable from `Solver`.
@@ -81,16 +81,16 @@ the Docker image, `mlmp.run/1` and `mlmp.trace/1` are unchanged.
 - **Threads must not leak in via CMake.** `CMakeLists.txt:76` runs `find_package(Threads QUIET)`
   and `src/ompl/CMakeLists.txt:49` links `$<$<BOOL:${Threads_FOUND}>:Threads::Threads>`.
   If that resolves, `-pthread` enters the build and the module needs SharedArrayBuffer.
-- **Exceptions are mandatory**: `solver.h:209-216` catches `ompl::Exception` per trace
+- **Exceptions are mandatory**: `solver.h:237-244` catches `ompl::Exception` per trace
   frame, and `BundleSpaceSequence::getPlannerData` throws if handed a populated
-  `PlannerData` (hence the fresh instance per frame at `solver.h:383`).
+  `PlannerData` (hence the fresh instance per frame at `solver.h:536`).
 - **C-space bounds are scene-independent**: `KinematicChainSpace` fixes bounds to ±π
   (`kinematic_chain.h:55-58`). Moving an obstacle changes only `Environment` segments and
   the padded bounding box (`scene.h:150-161`), never the state space or its dimension.
 - **Scene angles are integer degrees**: `scene.h:116,119` use `angle.get<int>()`. The
   editor must never emit fractional angles — it does not touch angles at all.
 - **`Scene::loadScene` takes a filename only** (`scene.h:33`) and opens the `ifstream`
-  itself. `ROADMAP.md:494` describes the signature wrongly; the MEMFS approach still works.
+  itself. `ROADMAP.md:564` describes the signature wrongly; the MEMFS approach still works.
 - **Eigen3 is a compile-time dependency** (`src/ompl/CMakeLists.txt:46`, header-only, so
   it never appears in `ldd`). `FLANN`, `Triangle`, `Spot` must stay off.
 - **`cmake --build --target ompl`** builds only the library, skipping the unconditional
@@ -99,15 +99,23 @@ the Docker image, `mlmp.run/1` and `mlmp.trace/1` are unchanged.
 
 Measured by Track A on `track-a/trace-player` and carried over here; not re-derived:
 
-- **Frame shape.** A frame is `{frame, t_s, vertices[], edges[]}`; `edges` are `[i, j]` index
-  pairs into that frame's own `vertices`; a vertex is `{level, component, tree, start, goal, q}`
-  (`solver.h:405-410`).
+- **Frame shape.** A frame is `{frame, t_s, tree_source, vertices[], edges[]}`; `edges` are
+  `[i, j]` index pairs into that frame's own `vertices`; a vertex is
+  `{level, component, tree, start, goal, q}` (`solver.h:539-570`).
 - **Tag vocabulary** is `0/1/2/3 → untagged/start/goal/section`, defined once in `treeLabel`
-  (`run_result.h:91-98`) and written only by `BiQRRTImpl::getPlannerData`
-  (`mlmp/src/planner/src/BiQRRTImpl.cpp:166-209`), which tags only the vertex range the base
+  (`run_result.h:97-104`). `component` is written by `BiQRRTImpl::getPlannerData`
+  (`mlmp/src/planner/src/BiQRRTImpl.cpp:176-219`), which tags only the vertex range the base
   call appends. `3` means in the graph but in neither tree — mostly the configurations
   `findSection()` adds — and is present whether or not the run solved, so it is not the
   solution path.
+- **Labels exist for every planner, derived when necessary.** If no vertex in a frame carries a
+  non-zero component, `Solver::deriveComponents` (`solver.h:500-526`) labels the graph instead:
+  multi-source BFS from `PlannerData`'s start vertices (1) and goal vertices (2) over that
+  frame's adjacency, nearest seed winning, start winning ties, 0 left where neither endpoint
+  reaches. `3` is never derived. The frame's `tree_source` is `"planner"` or `"derived"`
+  accordingly, and `packTrace.py` lifts the stream's single value to a top-level `tree_source`
+  in `mlmp.traceviz/1`, immediately after `tree_codes`. A UI that colours by tree must say
+  which of the two it is showing.
 - **A vertex at level `L` owns only its first `L + 1` links per robot**; the tail is
   identity-fibre padding re-derived each frame. The committed `scene1`/QRRT recording holds
   193 frames that each re-dump a full `q` per graph vertex; truncating to the owned prefix
@@ -161,7 +169,9 @@ export function createTracePlayer({ canvas, scene }) -> {
   pushFrame(frame),      // one mlmp.trace/1 frame; rendered as the current state, not accumulated
   setScene(scene),       // new scene JSON mid-session; recomputes extents + static layer, redraws
   setLevels(levels),     // Set<number> of visible bundle levels; default all
-  showPath(path),        // mlmp.run/1 `path`: full-dimension configurations, untruncated FK
+  showPath(path),        // mlmp.run/1 `path` (the simplified path): full-dimension states,
+                         // untruncated FK, drawn as an ordered tip trajectory with full arms
+                         // only at its endpoints
   reset(),               // clear vertices/edges/cached extents, keep canvas and scene
   destroy()
 }
@@ -181,16 +191,22 @@ export function createTracePlayer({ canvas, scene }) -> {
    Plot the tip, one dot per robot. Tolerate a short `q` — packed `mlmp.traceviz/1` vertices
    arrive pre-truncated — by breaking when the index passes the end of the array.
 4. **`showPath` is the one place the untruncated FK is correct.** `mlmp.run/1` `path` entries
-   are real full-dimension configurations, so draw whole arms through every joint, visually
-   distinct from `component == 3` (`section`) vertices, which are graph vertices in neither
-   tree — mostly `findSection()` configurations — and are not the solution path.
+   are real full-dimension configurations — and the *simplified* path, since `Solver` runs
+   `simplifyMax` in place before exporting them (`solver.h:269-282`). Draw it as an ordered
+   trajectory of chain tips with full arms at the first and last state only: an arm per
+   waypoint hides the ordering. It must stay visually distinct from `component == 3`
+   (`section`) vertices, which are graph vertices in neither tree — mostly `findSection()`
+   configurations — and are not the solution path.
 5. **Scene is a separate, replaceable input.** `mlmp.trace/1` carries no geometry. The
    renderer takes scene JSON (obstacles, `pinnedPosition`, `jointLength`, `metadata.n`)
    separately and accepts a new one at runtime via `setScene`, because Track E changes
    obstacles between solves. Link count comes from `scene.metadata.n`, never from the trace
    header, so the renderer does not depend on a header the live stream may not have delivered.
-6. **Tags are optional.** `tree` / `component` may be absent or unknown → treat as `untagged`.
-   Never test a planner name to decide how to colour a vertex.
+6. **Tags are optional, but a planner name is never a substitute.** `tree` / `component` may
+   be absent or unknown → treat as `untagged`. Never test a planner name to decide how to
+   colour a vertex: `captureFrame` labels the frames of planners that tag nothing, so the name
+   carries no colour information. The page, not the renderer, discloses whether a frame's
+   labels came from the planner or were derived (`tree_source`).
 7. **Bundle level is a visual channel while all levels are shown**, not only a filter. The
    live demo's whole point is seeing the coarse level solve first and restrict the fine level.
 8. **Extents are fixed from the scene**, never renormalised per frame. A view that rescales as
@@ -259,7 +275,7 @@ with `if(EMSCRIPTEN)`.
 
 - Wrap `find_package(Boost REQUIRED COMPONENTS program_options)` (line 11) in
   `if(NOT EMSCRIPTEN)`. `boost::program_options` is dead weight in this build
-  (`ROADMAP.md:496`) and is not available for wasm.
+  (`ROADMAP.md:566`) and is not available for wasm.
 - Keep `find_package(ompl 1.7 REQUIRED)` and `find_package(nlohmann_json 3.11 REQUIRED)`
   shared. Header-only Boost used by `solver.h:14` (`boost/range`) and
   `kinematic_chain.h:8` (`boost/math/constants`) needs no component.
@@ -392,7 +408,7 @@ On `solve`: `Module.FS.writeFile("/scene.json", sceneJson)` then
 `Module.solveScene("/scene.json", algo, timeLimitS, seed, traceIntervalMs / 1000,
 traceMaxFrames, (line) => postMessage({type:"frame", id, frame: JSON.parse(line)}))`,
 then post the parsed return value as `result`. The whole call is synchronous and blocking
-— that is the entire reason it lives in a Worker (`ROADMAP.md:491-492`).
+— that is the entire reason it lives in a Worker (`ROADMAP.md:561-562`).
 
 Trace parameters from the page: `traceIntervalMs = 50`, `traceMaxFrames = 400`, matching
 the CLI defaults (`main.cpp` `--trace-interval-ms` / `--trace-max-frames`). At a 10 s
@@ -451,15 +467,23 @@ logic.
   enabled throughout — that is the point of queueing rather than blocking.
 
 **Result panel.** Render `status`, `exact`, `path_length_raw`, `path_length_simplified`,
-`time_first_solution_s`, `graph_vertices`, `states_sampled`, and
-`trace.frames`/`trace.truncated`/`trace.errors`, under a fixed caption: *"Traced in-browser
-run — frame capture copies the planner graph, so these timings and counters are not
-benchmark numbers."* This is required, not cosmetic: `ROADMAP.md:204-205` states a traced run
-is never a timing run, and every browser run is traced by construction.
+`time_first_solution_s`, `graph_vertices`, `states_sampled`,
+`trace.frames`/`trace.truncated`/`trace.errors`, and a `trees` row reading
+`planner-reported` or `derived from connectivity` from the frames' `tree_source`, under a
+fixed caption: *"Traced in-browser run — frame capture copies the planner graph, so these
+timings and counters are not benchmark numbers."* This is required, not cosmetic:
+`ROADMAP.md:234-235` states a traced run is never a timing run, and every browser run is
+traced by construction.
+
+**View modes.** A `View` selector offers `graph + edges` (default), `vertices only` and
+`path only`, so a dense graph can be cleared away to read the returned path. The same three
+modes exist on the committed-fixture player, and both pages carry a disclosure next to the
+legend saying whether the tree colours were reported by the planner or derived from graph
+connectivity.
 
 **Error and invalid-scene rendering.** The returned object is either a result or
-`{schema, error:{kind,message}}` (`run_result.h:155-158`). Branch on the presence of
-`error` and show the message inline. For results, map `status` (`run_result.h:75-88`) to a
+`{schema, error:{kind,message}}` (`run_result.h:168-171`). Branch on the presence of
+`error` and show the message inline. For results, map `status` (`run_result.h:81-95`) to a
 message: `invalid_start` → "this obstacle blocks a robot's start configuration",
 `invalid_goal` → "…goal configuration", `timeout` → "no solution found in N s", and draw
 the path via `player.showPath(result.path)` when `solved` is true. There is no JS-side
@@ -473,8 +497,9 @@ verbatim from the two shipped copies (`docs/app.js`, `mlmp/tools/traceGif.py`), 
 agree; `main.js` then imports the module and uses only its six methods.
 
 - **Colour by tree** (`TREE_COLORS`): `start #1f77b4`, `goal #d62728`, `section #9467bd`,
-  `untagged #7f7f7f`. Green `#2ca02c` is not a tree colour: reserve it for `showPath`, the
-  only thing that draws the genuine returned solution path.
+  `untagged #7f7f7f`. These are the labels every planner now carries, tagged or derived.
+  Green `#2ca02c` is not a tree colour: it is `PATH_COLOR`, reserved for `showPath`, the only
+  thing that draws the genuine returned solution path.
 - **Opacity by level**: `alpha = 0.35 + 0.65 * level / max(1, links - 1)`.
 - **Dots**: radius `2.4` for `section`, `1.5` otherwise; the `section` layer drawn last so
   those configurations stay legible on top of both trees.
@@ -512,7 +537,7 @@ same `docker/setup-buildx-action@v3` and GHA cache pattern already present at
 2. **Size gate**: fail if
    `gzip -9 -c web/dist/mlmp.wasm | wc -c` plus `gzip -9 -c web/dist/mlmp.mjs | wc -c`
    exceeds 5 242 880 bytes. Print both numbers unconditionally so the measurement is in the
-   log whether it passes or not (`ROADMAP.md:270`: measure, do not estimate).
+   log whether it passes or not (`ROADMAP.md:319-320`: measure, do not estimate).
 3. **Node smoke** via a new committed `web/test/smoke.mjs`, run with `node web/test/smoke.mjs`:
    - For each of the 11 supported planners (all 12 minus `PRMStar`), solve `scene1.json`
      at `timeLimitS = 2`, seed 42: assert the parsed object has `schema === "mlmp.run/1"`
@@ -594,7 +619,7 @@ repo root.
    vertex with that tail zeroed. If it does not, the renderer is drawing identity-fibre
    padding, which is the one bug that looks like a working renderer.
 
-4. **Browser proof** (manual, and the actual Done-when of `ROADMAP.md:499-500`).
+4. **Browser proof** (manual, and the actual Done-when of `ROADMAP.md:569-570`).
    `python3 -m http.server 8000 --directory web/dist`, open `http://127.0.0.1:8000/`.
    - The page loads with `scene1` drawn, planner `BiQRRT` selected, `PRMStar` greyed out.
    - Press Solve: trees appear progressively during the 5 s budget, not all at once at the
@@ -650,5 +675,5 @@ repo root.
 - **BiQRRT solves `scene1` within the 5 s default in wasm.** If the step 3 smoke shows it
   needs more than 5 s, change the slider default to 10 s rather than shrinking or
   substituting the scene; the scene set is the committed regression set
-  (`ROADMAP.md:426`). Record the measured wasm-vs-native throughput ratio either way — it
+  (`ROADMAP.md:464`). Record the measured wasm-vs-native throughput ratio either way — it
   is the number Track B will want when it reads these results.

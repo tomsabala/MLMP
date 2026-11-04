@@ -487,6 +487,44 @@ private:
         throw std::runtime_error("Incompatible algorithm: " + algo);
     }
 
+    /* Only BiQRRTImpl tags vertices with its own trees (BiQRRTImpl::getPlannerData); every
+     * other planner leaves the component 0 on every vertex, which drew as one undifferentiated
+     * grey graph. Derive the same labels from the graph instead: a multi-source BFS from
+     * PlannerData's start vertices (component 1) and goal vertices (component 2) over the
+     * frame's own adjacency, nearest seed winning and start winning a tie. Vertices no endpoint
+     * reaches keep 0. Component 3 is BiQRRT's findSection() tag and is never derived.
+     *
+     * O(V + E) per frame, and only when the planner tagged nothing, so a traced BiQRRT run is
+     * untouched. The frame records which of the two it is in `tree_source`, because "derived
+     * from connectivity" and "the planner's own trees" are different claims. */
+    static void deriveComponents(const PlannerData& data,
+                                 const std::vector<std::vector<unsigned int>>& adjacency,
+                                 std::vector<unsigned int>& components) {
+        std::vector<unsigned int> queue;
+        queue.reserve(components.size());
+        for (unsigned int i = 0; i < components.size(); ++i) {
+            if (data.isStartVertex(i)) {
+                components[i] = 1u;
+                queue.push_back(i);
+            }
+        }
+        for (unsigned int i = 0; i < components.size(); ++i) {
+            if (components[i] == 0u && data.isGoalVertex(i)) {
+                components[i] = 2u;
+                queue.push_back(i);
+            }
+        }
+        for (std::size_t head = 0; head < queue.size(); ++head) {
+            const unsigned int u = queue[head];
+            for (unsigned int v : adjacency[u]) {
+                if (components[v] == 0u) {
+                    components[v] = components[u];
+                    queue.push_back(v);
+                }
+            }
+        }
+    }
+
     /* One mlmp.trace/1 frame. A fresh PlannerData per frame is mandatory:
      * BundleSpaceSequence::getPlannerData throws if handed a populated one. It also
      * tags each vertex with its bundle level and lifts the state into the total space,
@@ -498,15 +536,26 @@ private:
         PlannerData data(topSi);
         planner->getPlannerData(data);
 
-        Json frame = Json{{"frame", index},
-                          {"t_s", tSeconds},
-                          {"vertices", Json::array()},
-                          {"edges", Json::array()}};
+        const unsigned int vertexCount = data.numVertices();
+
+        /* `tree_source` describes the labels in this frame, so a frame with no vertices makes no
+         * claim and omits the key; the first frame of every run is empty. Consumers default to
+         * "planner". */
+        Json frame = Json{{"frame", index}, {"t_s", tSeconds}};
+        if (vertexCount > 0) {
+            frame["tree_source"] = "planner";
+        }
+        frame["vertices"] = Json::array();
+        frame["edges"] = Json::array();
         Json& vertices = frame["vertices"];
         Json& edges = frame["edges"];
 
+        std::vector<unsigned int> components(vertexCount, 0u);
+        std::vector<std::vector<unsigned int>> adjacency(vertexCount);
+        bool tagged = false;
+
         const StateSpacePtr space = topSi->getStateSpace();
-        for (unsigned int i = 0; i < data.numVertices(); ++i) {
+        for (unsigned int i = 0; i < vertexCount; ++i) {
             const PlannerDataVertex& v = data.getVertex(i);
             const auto* annotated =
                 dynamic_cast<const ompl::multilevel::PlannerDataVertexAnnotated*>(&v);
@@ -516,10 +565,11 @@ private:
                 space->copyToReals(q, v.getState());
             }
 
-            const unsigned int component = annotated ? annotated->getComponent() : 0u;
+            components[i] = annotated ? annotated->getComponent() : 0u;
+            tagged = tagged || components[i] != 0u;
             vertices.push_back(Json{{"level", annotated ? annotated->getLevel() : 0u},
-                                    {"component", component},
-                                    {"tree", treeLabel(component)},
+                                    {"component", components[i]},
+                                    {"tree", treeLabel(components[i])},
                                     {"start", data.isStartVertex(i)},
                                     {"goal", data.isGoalVertex(i)},
                                     {"q", q}});
@@ -528,6 +578,17 @@ private:
             data.getEdges(i, out);
             for (unsigned int j : out) {
                 edges.push_back(Json::array({i, j}));
+                adjacency[i].push_back(j);
+                adjacency[j].push_back(i);
+            }
+        }
+
+        if (!tagged && vertexCount > 0) {
+            deriveComponents(data, adjacency, components);
+            frame["tree_source"] = "derived";
+            for (unsigned int i = 0; i < vertexCount; ++i) {
+                vertices[i]["component"] = components[i];
+                vertices[i]["tree"] = treeLabel(components[i]);
             }
         }
 

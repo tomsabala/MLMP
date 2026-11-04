@@ -93,6 +93,10 @@ point is a cross-track break.
 `state_validity_checks`, `states_sampled`, `motion_checks`, `motion_checks_valid`,
 `trace{file,frames,truncated,errors}`.
 
+`path` is the state sequence of the *simplified* path: `simplifyMax` runs in place on the
+solution before the states are copied out, so `path` corresponds to `path_length_simplified`
+unless `--no-simplify` was given.
+
 `status` is one of `unknown`, `invalid_start`, `invalid_goal`, `unrecognized_goal_type`,
 `timeout`, `approximate_solution`, `exact_solution`, `crash`, `abort`, `infeasible`.
 `solved` is true for approximate solutions too; `exact` is the field that separates them.
@@ -115,36 +119,53 @@ Line 1 is a header (`schema`, `planner`, `scene`, `seed`, `robots`, `links`,
 `time_limit_s`, `interval_ms`); every later line is a frame:
 
 ```json
-{"frame":7,"t_s":0.35,"vertices":[
+{"frame":7,"t_s":0.35,"tree_source":"planner","vertices":[
   {"level":0,"component":1,"tree":"start","start":true,"goal":false,"q":[0.1,-0.4,0.0,0.0]},
   {"level":0,"component":2,"tree":"goal","start":false,"goal":true,"q":[0.9,1.2,0.0,0.0]}],
  "edges":[[0,1]]}
 ```
 
-(shown wrapped; each frame is one line. `edges` are `[i, j]` index pairs into that frame's own
-`vertices` array.)
+(shown wrapped; each frame is one line. Key order is `frame`, `t_s`, `tree_source`,
+`vertices`, `edges`. `edges` are `[i, j]` index pairs into that frame's own `vertices`
+array.)
 
 `--trace-interval-ms` (default 50) and `--trace-max-frames` (default 400) bound the output;
 hitting the cap sets `trace.truncated`. Measured on the committed `scene1`/BiQRRT recording at
 a 10 s budget: 199 frames spanning levels 0–3, every `q` of full dimension 8, `trace.errors` 0.
 
-**Tree tagging.** `component` is written by `BiQRRTImpl::getPlannerData`, which records
-`firstNew = data.numVertices()` before chaining to the base call and tags only the vertex
-range the base call appends, via `PlannerDataVertexAnnotated::setComponent` — lower levels of
-the sequence are already in `data` and belong to other instances with their own trees. `tree`
-is the string form, produced by `treeLabel` (`mlmp/src/models/run_result.h:91-98`), which is
-the single definition of the vocabulary:
+**Tree tagging, and where the labels come from.** `component` is written by
+`BiQRRTImpl::getPlannerData`, which records `firstNew = data.numVertices()` before chaining to
+the base call and tags only the vertex range the base call appends, via
+`PlannerDataVertexAnnotated::setComponent` — lower levels of the sequence are already in `data`
+and belong to other instances with their own trees. Every other planner tags nothing, so
+`captureFrame` derives the same two labels instead (`Solver::deriveComponents`,
+`mlmp/src/models/solver.h:500-526`): when no vertex in the frame carries a non-zero component,
+a multi-source BFS runs from `PlannerData`'s start vertices (seeded 1) and goal vertices
+(seeded 2) over that frame's own adjacency — nearest seed wins, start wins a tie — and
+vertices neither endpoint reaches keep 0. Component 3 is BiQRRT's `findSection()` tag and is
+never derived.
+
+Each frame says which of the two it is in **`tree_source`**: `"planner"` when the planner
+tagged its own trees, `"derived"` when the labels were computed from connectivity. The two are
+different claims and a consumer that colours by tree must disclose which one it is showing.
+Derivation is O(V + E) per frame and runs only when the planner tagged nothing, so a traced
+BiQRRT run is untouched.
+
+`tree` is the string form of `component`, produced by `treeLabel`
+(`mlmp/src/models/run_result.h:97-104`), which is the single definition of the vocabulary:
 
 |`component`|`tree`|meaning|
 |---|---|---|
-|0|`untagged`|any planner that does not tag — QRRT emits this for every vertex|
-|1|`start`|start tree|
-|2|`goal`|goal tree|
-|3|`section`|in the graph, in neither tree — mostly `findSection()` configurations, present whether or not the run solved|
+|0|`untagged`|no tag and no derivation reached it — on a derived frame, a vertex in no component containing a start or goal vertex|
+|1|`start`|start tree (tagged by BiQRRT, otherwise derived)|
+|2|`goal`|goal tree (tagged by BiQRRT, otherwise derived)|
+|3|`section`|in the graph, in neither tree — mostly `findSection()` configurations, present whether or not the run solved; BiQRRT only, never derived|
 
-No consumer may test a planner name to decide how to colour a vertex; unknown or missing tags
-read as `untagged`. `start` and `goal` are `PlannerData::isStartVertex` / `isGoalVertex` —
-which endpoint a vertex *is*, not which tree it belongs to.
+No consumer may test a planner name to decide how to colour a vertex. That is no longer only a
+convention: `captureFrame` labels every planner's frames, so a planner name carries no colour
+information a consumer could use. Unknown or missing tags read as `untagged`. `start` and
+`goal` are `PlannerData::isStartVertex` / `isGoalVertex` — which endpoint a vertex *is*, not
+which tree it belongs to.
 
 **Every `q` is full dimension, and most of it is padding.** `BundleSpaceSequence::getPlannerData`
 lifts each level's states into the total space, so a frame's `q` is always `robots * links`
@@ -162,10 +183,14 @@ a consumer renders the latest frame and drops it. Retaining frames is why a raw 
 is 0.3–0.9 GB, which is what `mlmp.traceviz/1` below exists to fix.
 
 CI's "Trace contract" step asserts frame shape, `len(q) == robots * links`, `trace.errors == 0`,
-that both `start` and `goal` appear, and that `untagged` never does for BiQRRT.
+that both `start` and `goal` appear, that `untagged` never does for BiQRRT, and that BiQRRT's
+frames report `tree_source == "planner"`. A second short QRRT run on the same scene, seed and
+budget asserts the other half: `tree_source == "derived"` on every frame and `start`-labelled
+vertices present — the regression that made eleven of the twelve planners draw as one
+undifferentiated grey graph.
 
 Traces recorded before `6974fd6` carry `component == 0` everywhere: `ompl::multilevel` never
-calls `setComponent`, so the field was unused before Track A.
+calls `setComponent`, so the field was unused before Track A, and derivation did not exist yet.
 
 ### `mlmp.traceviz/1` — committed fixtures
 
@@ -177,14 +202,20 @@ Every vertex and edge is stored once, in order of first appearance, each vertex 
 the prefix it owns: `[level, component, …q]`. Each frame is `[t_s, vertexCount, edgeCount]`,
 so frame `k` is exactly `vertices[:nv]` / `edges[:ne]`. Top-level keys: `schema`, `source`,
 `planner`, `scene`, `seed`, `robots`, `links`, `time_limit_s`, `interval_ms`, `tree_codes`,
-`run` (an `mlmp.run/1` subset, for captions), `vertices`, `edges`, `frames`.
+`tree_source` (the stream's one `mlmp.trace/1` `tree_source` value, propagated by
+`packTrace.py`, which refuses a stream that mixes the two), `run` (an `mlmp.run/1` subset, for
+captions), `vertices`, `edges`, `frames`.
 
 Both properties the format relies on — truncation losing nothing a renderer draws, and the
 truncated vertex and edge sets growing append-only — are asserted by `packTrace.py`, which
 exits non-zero rather than silently dropping data.
 
-Measured: 12 fixtures (6 scenes × BiQRRT/QRRT) at 0.74–1.37 MB each, plus their `.run.json`
-siblings, under `docs/traces/`.
+Measured: 12 fixtures (6 scenes × BiQRRT/QRRT) packed at 0.36–0.82 MB each, plus their
+`.run.json` siblings, under `docs/traces/`. All 12 were re-recorded with a derivation-capable
+image: the BiQRRT six carry `"tree_source": "planner"`, the QRRT six `"derived"`, with
+`start`/`goal` on every vertex an endpoint reaches. A consumer reading a fixture with no
+`tree_source` key must treat it as `"planner"`, which is the default `packTrace.py` itself
+applies to a frame that carries no labels at all — the vertex-less first frame of every run.
 
 A live stream does not need this format. A renderer driven by snapshots can be fed either one,
 which is what keeps a single drawing path for the static page and for Track E.
@@ -214,17 +245,21 @@ touch, and what makes it done.
   `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` and the 5.7 MB README GIF; `docs/` — a
   dependency-free scrubber page with per-scene BiQRRT-vs-QRRT panels, frame stepping, level
   toggles and run captions; 12 packed fixtures and 6 scene copies.
-- **Not shipped: the module shape.** `docs/app.js` exports nothing, resolves twelve elements
-  by id (eight in `el` at `:22-31`, four in `panels` at `:33-36`) and does random access over
-  a whole packed fixture, so Track E cannot import it. And nothing committed draws
-  `mlmp.run/1`'s `path` array — the purple on the page is `component == 3`, the `section`
-  vertices, which is a different thing.
+- **Not shipped: the module shape** (state at the end of `track-a/trace-player`, both items
+  since closed by Track E). `docs/app.js` exported nothing, resolved twelve elements by id
+  (eight in `el`, four in `panels`) and did random access over a whole packed fixture, so
+  Track E could not import it. And nothing committed drew `mlmp.run/1`'s `path` array — the
+  purple on the page is `component == 3`, the `section` vertices, which is a different thing.
 - **Done when.** `web/src/renderer.js` exists (Track E owns it — step 7 of
   `WASM_PLANNER_PORT_PLAN.md`), `docs/app.js` draws through it, and `showPath` renders the
   run's solution path. **Done** on `track-e/wasm-browser-planner`: the module ships at
   `web/src/renderer.js` with a byte-identical committed copy at `docs/renderer.js` (CI runs
   `cmp` on the pair), `docs/app.js` is a module that imports it, and the two solved runs
-  (`scene1`/`scene5` BiQRRT) now draw their `mlmp.run/1` `path` as connected green arms.
+  (`scene1`/`scene5` BiQRRT) draw their `mlmp.run/1` `path` in green. That array is the
+  *simplified* path — `Solver` runs `simplifyMax` in place before exporting it
+  (`mlmp/src/models/solver.h:269-282`), unless `--no-simplify` was passed — and it is drawn
+  as an ordered chain-tip trajectory with full arms only at its first and last state, so the
+  waypoint order is readable instead of a pile of overlapping arms.
 
 ### Track B — Experiment harness (§2.1–2.4)
 
@@ -290,8 +325,9 @@ touch, and what makes it done.
   cannot import JS; the two are kept honest by a constant/parity check, not by convention.
 - **Constraint: two forward-kinematics rules, not one.** The renderer truncates to the
   vertex's level and plots tips only, one dot per robot, because everything above the level is
-  padding. `showPath` uses the untruncated FK and draws whole arms, because `mlmp.run/1`'s
-  `path` entries are real full-dimension configurations.
+  padding. `showPath` uses the untruncated FK, because `mlmp.run/1`'s `path` entries are real
+  full-dimension configurations; it draws the ordered chain-tip trajectory through them and
+  full arms only at the first and last state, since one arm per waypoint buries the path.
 - **Constraint: one Pages artifact.** `docs/` is the published Pages site today, and the README
   links its URL. A Pages workflow added here must publish a single artifact containing both
   surfaces, or it takes the player offline.
@@ -354,12 +390,14 @@ and bundle level in every frame (`6974fd6`); the side-by-side page with BiQRRT a
 same scene and seed; the 10-second looping GIF at the top of the README; the scrubber that
 steps frame by frame and toggles bundle levels.
 
-**Outstanding**: the solution path drawn from `mlmp.run/1`, which nothing committed renders;
-the renderer as a module shared with Track E rather than a page script; and the animation's
-stacked-levels reading of the hierarchy — the coarse level solving first and then
-*restricting* the fine level's sampling — which is visible in the scrubber but is not what the
-GIF narrates. The side-by-side also stays unconvincing until Track F lands, since QRRT solves
-no scene at a 10 s budget.
+**Outstanding**: the animation's stacked-levels reading of the hierarchy — the coarse level
+solving first and then *restricting* the fine level's sampling — which is visible in the
+scrubber but is not what the GIF narrates. The side-by-side also stays unconvincing until
+Track F lands, since QRRT solves no scene at a 10 s budget; it is now at least legible, since
+`captureFrame` derives `start`/`goal` labels for planners that tag nothing.
+
+**Closed since**: the solution path from `mlmp.run/1` is drawn by `showPath`, and the renderer
+is a module (`web/src/renderer.js`) shared with Track E rather than a page script.
 
 No solver in the browser, so it is static JSON on GitHub Pages with no toolchain and no
 hosting requirements. Running the planner live in the browser is Phase 6 and costs vastly

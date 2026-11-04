@@ -10,7 +10,8 @@
  * why the raw mlmp.trace/1 stream cannot be served directly.
  *
  * The sibling *.run.json holds the mlmp.run/1 result, whose `path` is a real full-dimension
- * solution; showPath draws it as connected arms. Only the two solved runs have a non-empty one. */
+ * solution; showPath draws it as each robot's tip trajectory between solid start and goal arms.
+ * Only the two solved runs have a non-empty one. */
 import { PATH_COLOR, TREE_COLORS, createTracePlayer } from './renderer.js';
 
 const el = {
@@ -22,6 +23,7 @@ const el = {
   counter: document.getElementById('counter'),
   levels: document.getElementById('levels'),
   legend: document.getElementById('legend'),
+  view: document.getElementById('view'),
 };
 
 const panels = [
@@ -35,6 +37,8 @@ const state = {
   total: 1,
   playing: false,
   levels: new Set(),
+  /* legend entry name -> its <span>, so a redraw can dim the colours this scene has none of. */
+  legend: new Map(),
   intervalMs: 50,
   lastTick: 0,
   accumulator: 0,
@@ -59,6 +63,14 @@ function captionOf(panel, index) {
   if (typeof run.time_first_solution_s === 'number') {
     bits.push(`first ${run.time_first_solution_s.toFixed(2)} s`);
   }
+  /* mlmp.traceviz/1 carries packTrace.py's propagated tree_source: either the planner tagged
+   * its own trees or solver.h derived the labels from graph connectivity. Fixtures recorded
+   * before the field exists are planner-tagged BiQRRT/QRRT runs. */
+  bits.push(
+    panel.packed.tree_source === 'derived'
+      ? 'trees: derived from connectivity'
+      : 'trees: planner-reported'
+  );
   const frame = panel.frames[index];
   bits.push(
     `frame ${index + 1}/${panel.frames.length} · t = ${(frame ? frame[0] : 0).toFixed(2)} s`
@@ -81,6 +93,7 @@ function render() {
         edges: panel.data.packed.edges,
         vertexCount: nv,
         edgeCount: ne,
+        treeSource: panel.data.packed.tree_source,
       });
       panel.caption.textContent = captionOf(panel.data, index);
     } else {
@@ -88,6 +101,7 @@ function render() {
       panel.caption.textContent = `${panel.data.packed.planner} · no frames recorded`;
     }
   }
+  updateLegend();
   el.slider.value = String(state.frame);
   el.counter.textContent = `${state.frame + 1} / ${state.total}`;
 }
@@ -119,6 +133,7 @@ function buildLevelToggles(links) {
 
 function buildLegend() {
   el.legend.textContent = '';
+  state.legend = new Map();
   /* TREE_COLORS covers the graph's component tags only; showPath draws the run's solution in
    * PATH_COLOR, which would otherwise be missing from the legend entirely. */
   const entries = [...Object.entries(TREE_COLORS), ['solution path', PATH_COLOR]];
@@ -130,6 +145,25 @@ function buildLegend() {
     item.appendChild(swatch);
     item.appendChild(document.createTextNode(name));
     el.legend.appendChild(item);
+    state.legend.set(name, item);
+  }
+}
+
+/* A colour this frame has none of stays in the legend and is dimmed instead of removed: the
+ * reader has to be able to tell "this run has no goal tree" from "this page cannot show one".
+ * Counts are summed over both panels, because the legend is shared. */
+function updateLegend() {
+  const totals = { start: 0, goal: 0, section: 0, untagged: 0 };
+  let hasPath = false;
+  for (const panel of panels) {
+    if (!panel.player) continue;
+    const counts = panel.player.treeCounts();
+    for (const key of Object.keys(totals)) totals[key] += counts[key];
+    hasPath = hasPath || panel.hasPath === true;
+  }
+  for (const [name, item] of state.legend) {
+    const empty = name === 'solution path' ? !hasPath : totals[name] === 0;
+    item.classList.toggle('dim', empty);
   }
 }
 
@@ -157,6 +191,8 @@ async function loadScene(name) {
     panel.data = preparePanel(fixtures[i]);
     if (panel.player) panel.player.setScene(scene);
     else panel.player = createTracePlayer({ canvas: panel.canvas, scene });
+    panel.player.setViewMode(el.view.value);
+    panel.hasPath = Array.isArray(runs[i].path) && runs[i].path.length > 0;
     panel.player.showPath(runs[i].path ?? null);
   });
   state.total = Math.max(1, ...panels.map((p) => p.data.frames.length));
@@ -194,6 +230,12 @@ el.play.addEventListener('click', () => {
 el.prev.addEventListener('click', () => setFrame(state.frame - 1));
 el.next.addEventListener('click', () => setFrame(state.frame + 1));
 el.slider.addEventListener('input', () => setFrame(Number(el.slider.value)));
+el.view.addEventListener('change', () => {
+  for (const panel of panels) {
+    if (panel.player) panel.player.setViewMode(el.view.value);
+  }
+  render();
+});
 el.scene.addEventListener('change', () => {
   loadScene(el.scene.value).catch(reportError);
 });

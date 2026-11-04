@@ -12,7 +12,9 @@
   <p>Committed <code>mlmp.traceviz/1</code> fixtures packed from <code>mlmp.trace/1</code>
      recordings — seed 42, 10 s budget, 50 ms per frame. Colour is tree membership, opacity is
      bundle level, and each dot is one robot's chain tip at that vertex's bundle level
-     (a level-<em>L</em> vertex owns only its first <em>L</em>+1 links).</p>
+     (a level-<em>L</em> vertex owns only its first <em>L</em>+1 links). The run's solution is
+     drawn in green as each robot's tip trajectory between its start and goal arms. Switch the
+     view to <em>vertices only</em> or <em>path only</em> when the edge web hides the result.</p>
 </header>
 
 <section class="controls">
@@ -31,6 +33,13 @@
   <button id="next">+1</button>
   <input id="slider" type="range" min="0" max="0" value="0">
   <span id="counter" class="counter">0 / 0</span>
+  <label>View
+    <select id="view">
+      <option value="graph" selected>graph + edges</option>
+      <option value="vertices">vertices only</option>
+      <option value="path">path only</option>
+    </select>
+  </label>
   <span id="levels" class="levels"></span>
   <span id="legend" class="legend"></span>
 </section>

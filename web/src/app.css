@@ -33,6 +33,9 @@ header p { margin: 0 0 1rem; max-width: 70ch; opacity: .8; }
 .levels label { display: inline-flex; gap: .2rem; align-items: center; }
 
 .legend span { display: inline-flex; gap: .3rem; align-items: center; }
+/* A colour this run has none of: still listed, visibly absent. */
+.legend .dim { opacity: .35; }
+.source { font-size: .82rem; opacity: .75; }
 .swatch {
   width: .7rem;
   height: .7rem;

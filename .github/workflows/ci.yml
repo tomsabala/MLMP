@@ -127,7 +127,9 @@ jobs:
             --trace-file /out/trace.jsonl > trace-out/run.json && code=0 || code=$?
           # 3 s is below the measured solve budget, so exit 1 is a legal outcome here.
           case "$code" in 0|1) ;; *) echo "unexpected exit $code"; exit 1 ;; esac
-          python3 - <<'PY'
+          # `set -e` is off here, and this is no longer the step's last command, so a failed
+          # assertion must terminate the step explicitly.
+          python3 - <<'PY' || exit 1
           import json
           run = json.load(open('trace-out/run.json'))
           lines = [l for l in open('trace-out/trace.jsonl').read().splitlines() if l]
@@ -145,6 +147,28 @@ jobs:
                   trees.add(v['tree'])
           assert 'start' in trees and 'goal' in trees, trees
           assert 'untagged' not in trees, 'BiQRRT left vertices untagged'
+          # BiQRRT tags its own trees, so captureFrame must not have derived anything. The
+          # first frame is captured before any vertex exists and labels nothing, so it carries
+          # no tree_source at all.
+          sources = {f.get('tree_source') for f in frames if f['vertices']}
+          assert sources == {'planner'}, sources
+          PY
+          # Same scene, seed and budget with a planner that tags nothing: captureFrame has to
+          # label the graph by connectivity, or every viewer draws one grey hairball again.
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/trace-out:/out" mlmp:ci \
+            --algo QRRT --input-file "$SOLVE_SCENE" --time-limit 3 --seed 42 \
+            --trace-file /out/qrrt.jsonl > trace-out/qrrt-run.json && code=0 || code=$?
+          case "$code" in 0|1) ;; *) echo "unexpected exit $code"; exit 1 ;; esac
+          python3 - <<'PY'
+          import json
+          lines = [l for l in open('trace-out/qrrt.jsonl').read().splitlines() if l]
+          assert json.loads(lines[0])['schema'] == 'mlmp.trace/1', lines[0][:80]
+          frames = [json.loads(l) for l in lines[1:]]
+          assert frames, 'no QRRT frames captured'
+          sources = {f.get('tree_source') for f in frames if f['vertices']}
+          assert sources == {'derived'}, sources
+          trees = {v['tree'] for f in frames for v in f['vertices']}
+          assert 'start' in trees, trees
           PY
 
       - name: Bad input exits 2

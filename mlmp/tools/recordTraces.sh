@@ -16,8 +16,10 @@
 # while the committed scene1-biqrrt.run.json records 5.859011316773332. Re-recording therefore
 # changes the .run.json numbers; that is expected, not a regression.
 #
-# The image must be new enough to tag tree membership (component 1/2/3 on trace vertices).
-# ghcr.io/tomsabala/mlmp:latest predates tagging, so it is deliberately not the default.
+# The image must be new enough to label tree membership on trace vertices: BiQRRT tags
+# components 1/2/3 itself, and since derivation landed the binary labels every other planner's
+# frames by connectivity. ghcr.io/tomsabala/mlmp:latest predates both, so it is deliberately
+# not the default.
 set -uo pipefail
 IMAGE="${1:-mlmp:dev}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -45,8 +47,11 @@ PY
 )
     if [ "$tagged" = "0" ]; then
       echo "FATAL: $name packed with every vertex untagged (component 0)." >&2
-      echo "       The image '$IMAGE' most likely predates tree tagging; use mlmp:dev or a" >&2
-      echo "       release built after it. Refusing to commit single-colour fixtures." >&2
+      echo "       Expected either the planner's own tags or labels derived from connectivity." >&2
+      echo "       Either the image '$IMAGE' predates tree labelling (use mlmp:dev or a release" >&2
+      echo "       built after it), or no vertex in the whole run was connected to the start or" >&2
+      echo "       goal state — a run with nothing to show. Refusing to commit single-colour" >&2
+      echo "       fixtures either way; check '$OUT/$name.run.json' to tell the two apart." >&2
       exit 3
     fi
     rm -f "$RAW/$name.jsonl"

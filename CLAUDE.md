@@ -35,7 +35,9 @@ the image.
 fixtures in `docs/traces/`, plus the README GIF. `mlmp/tools/recordTraces.sh` re-records them
 through the Docker image and `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` renders the GIF
 from the committed fixtures alone. A traced run is not byte-reproducible, so the `.run.json`
-files beside the fixtures are records of one recording, not pinned targets.
+files beside the fixtures are records of one recording, not pinned targets. All 12 were recorded
+with a derivation-capable image, so the BiQRRT fixtures carry `"tree_source": "planner"` and the
+QRRT ones `"derived"`.
 
 ## Tests
 
@@ -47,7 +49,10 @@ There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs
 4. **Trace contract**: a 3 s `--trace-file` BiQRRT run must exit 0 or 1 (3 s is below the solve
    budget), and its JSONL must carry an `mlmp.trace/1` header, `len(q) == robots * links` on
    every vertex, `trace.errors == 0`, `trace.frames` matching the line count, both `start` and
-   `goal` among the `tree` labels, and no `untagged` vertex.
+   `goal` among the `tree` labels, no `untagged` vertex, and `tree_source == "planner"` on
+   every frame. The same step then traces QRRT on the same scene, seed and budget and requires
+   `tree_source == "derived"` plus `start`-labelled vertices — `captureFrame` must label the
+   graph of a planner that tags nothing.
 5. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
 6. **URDF solve**: BiQRRT must solve `ur5_scene1.json` within 2 s with `model == "urdf"`, `dof == 6`.
 7. **Planar regression pin**: `scene1.json --seed 42` must still report `path_length_raw ==
@@ -131,6 +136,13 @@ padded bounding box. Scene JSON angles are integer degrees, converted to radians
 - **`captureFrame` needs a fresh `PlannerData` every time**, because `BundleSpaceSequence::getPlannerData`
   throws if the one it gets is already populated. A failed frame counts toward `trace.errors`; it isn't
   a run failure.
+- **Tree labels are derived when the planner tags none.** Only `BiQRRTImpl::getPlannerData` sets
+  `component`; for every other planner `captureFrame` runs `deriveComponents`, a multi-source BFS
+  from `PlannerData`'s start (1) and goal (2) vertices over the frame's adjacency, nearest seed
+  winning and start winning ties, leaving 0 where neither endpoint reaches. Component 3
+  (`section`) is BiQRRT's `findSection()` tag and is never derived. Each frame reports which case
+  it was in `tree_source` (`"planner"` / `"derived"`), a key the viewers surface, so do not drop
+  it or let a run emit both values.
 
 `state/oriented_real_vector_state_space.h` isn't included anywhere (dead code). `BiQRRTImpl::setup()`
 still defaults `maxDistance_` to `0.1` whenever no caller set a range, and that planar default is a

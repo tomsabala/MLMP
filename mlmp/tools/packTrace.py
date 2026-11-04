@@ -23,6 +23,12 @@ properties of the stream make it compressible without losing anything a renderer
 
 So the fixture stores every vertex and edge once, and each frame is a timestamp plus two
 counts. packTrace asserts both properties and fails loudly rather than silently dropping data.
+
+A vertex's identity here is (level, truncated q) — the component is NOT part of it. On a
+tree_source == "derived" stream the label is a property of the graph at that instant and moves
+as edges arrive, so one configuration can be labelled 0 then 1 then 2; the stored row keeps the
+last label it carried, and a replay therefore colours a vertex by the side it ends up on.
+Planner-tagged streams never relabel.
 """
 import argparse
 import json
@@ -53,6 +59,10 @@ def packTrace(tracePath, runPath, digits):
     edgeIds = {}
     edges = []
     frames = []
+    # "planner" (BiQRRT tagged its own trees) or "derived" (captureFrame labelled the graph by
+    # connectivity because the planner tagged nothing). Constant within a run; the players say
+    # which one the colours mean, so a disagreement mid-stream is a bug, not a merge.
+    treeSource = None
     # The stream is far too large to buffer, so a decode failure is held open for one line
     # instead: if anything later parses, the held line was mid-stream corruption, not the
     # truncated final line a killed recorder leaves behind.
@@ -85,6 +95,18 @@ def packTrace(tracePath, runPath, digits):
                     raise SystemExit(f"{tracePath}: not an mlmp.trace/1 stream")
                 continue
 
+            # A frame with no vertices omits the key entirely: it labels nothing, so it makes no
+            # claim to agree or disagree with. Every frame that does carry labels must agree.
+            frameSource = obj.get("tree_source")
+            if frameSource is not None:
+                if treeSource is None:
+                    treeSource = frameSource
+                elif frameSource != treeSource:
+                    raise SystemExit(
+                        f"{tracePath}: frame {obj['frame']} reports tree_source "
+                        f"{frameSource!r} after {treeSource!r}; the stream mixes label sources"
+                    )
+
             robots = header["robots"]
             local = []
             for v in obj["vertices"]:
@@ -96,12 +118,22 @@ def packTrace(tracePath, runPath, digits):
                     for j in range(level + 1)
                     for r in range(robots)
                 )
-                key = (level, component, owned)
+                # Keyed by geometry alone. A derived component is a property of the graph at
+                # that instant, not of the configuration: as edges arrive, the endpoint nearest
+                # a vertex can change, so the same configuration may be labelled 0 then 1 then
+                # 2 across frames (measured on scene5/QRRT: 2 790 relabels in 20 frames). The
+                # packed format stores one row per vertex, so the row keeps the LAST label the
+                # vertex carried — a replay therefore colours a vertex by the side it ends up
+                # on. Planner-tagged streams never relabel, so this only affects
+                # tree_source == "derived" fixtures.
+                key = (level, owned)
                 vid = vertexIds.get(key)
                 if vid is None:
                     vid = len(vertices)
                     vertexIds[key] = vid
                     vertices.append([level, component, *owned])
+                else:
+                    vertices[vid][1] = component
                 local.append(vid)
 
             seen = set(local)
@@ -136,6 +168,17 @@ def packTrace(tracePath, runPath, digits):
     if header is None:
         raise SystemExit(f"{tracePath}: no header line")
 
+    # Every id is created by the frame that first shows it, and each frame's ids are a prefix,
+    # so the last frame must hold all of them. A fixture whose frames all count 0 while the
+    # vertex table is full renders as an empty player, which is exactly the silent failure this
+    # packer exists to prevent.
+    if frames and (frames[-1][1] != len(vertices) or frames[-1][2] != len(edges)):
+        raise SystemExit(
+            f"{tracePath}: last frame counts {frames[-1][1]} vertices and {frames[-1][2]} edges "
+            f"but the fixture holds {len(vertices)} and {len(edges)}; the per-frame prefix is "
+            "not the whole table"
+        )
+
     run = {}
     if runPath and Path(runPath).exists():
         try:
@@ -155,6 +198,7 @@ def packTrace(tracePath, runPath, digits):
         "time_limit_s": header["time_limit_s"],
         "interval_ms": header["interval_ms"],
         "tree_codes": {str(k): v for k, v in TREE_CODES.items()},
+        "tree_source": treeSource or "planner",
         "run": run,
         "vertices": vertices,
         "edges": edges,

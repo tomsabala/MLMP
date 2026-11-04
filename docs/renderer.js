@@ -9,6 +9,10 @@
  * padding, not planner output, and is never drawn. Solution paths (mlmp.run/1 `path`) are the
  * exception: those are real full-dimension configurations, so showPath walks every link.
  *
+ * Three view modes exist because the grey edge web is what collapses a 10 000-vertex graph into
+ * a blob: `graph` draws edges, vertices and the path, `vertices` drops the edges, `path` drops
+ * the graph entirely. Edge and dot styling also thins out once a frame is dense.
+ *
  * No DOM lookup beyond the canvas handed in, no event listeners, no module state: the page owns
  * resize and calls redraw(). */
 
@@ -29,6 +33,9 @@ export const PADDING = 0.05;
  * construction; it is ignored in favour of this one so there is a single definition. Never infer
  * a tree from the planner name. */
 export const TREE_CODES = { 0: 'untagged', 1: 'start', 2: 'goal', 3: 'section' };
+
+/* setViewMode's vocabulary; `graph` is the default and the historical picture. */
+export const VIEW_MODES = ['graph', 'vertices', 'path'];
 
 export function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -147,6 +154,13 @@ export function createTracePlayer({ canvas, scene } = {}) {
   let levels = null; // null => every level visible
   let frame = null;  // one retained reference, not an accumulation
   let path = null;
+  let viewMode = 'graph';
+  /* 'planner' (the planner tagged its own trees) or 'derived' (mlmp.trace/1 labels computed from
+   * graph connectivity). A frame that says nothing is a planner-tagged one. */
+  let treeSource = 'planner';
+  /* Per-redraw tally of the vertices actually drawn, filled by the vertex walk in drawFrame so
+   * treeCounts() adds no second pass; null means "not walked since the last redraw". */
+  let counts = null;
 
   /* FK memo. Load-bearing, not an optimisation: the scrubber pushes the same `vertices` array
    * object every frame (scene1/BiQRRT is 9 722 vertices), so it must hit fully or playback gets
@@ -165,6 +179,8 @@ export function createTracePlayer({ canvas, scene } = {}) {
     cacheSource = null;
     frame = null;
     path = null;
+    counts = null;
+    treeSource = 'planner';
   }
 
   function deriveVertex(i) {
@@ -202,6 +218,28 @@ export function createTracePlayer({ canvas, scene } = {}) {
 
   function visible(level) {
     return levels === null || levels.has(level);
+  }
+
+  /* The fallback for the one case drawFrame cannot cover: view mode `path` draws no vertices, so
+   * a page asking for the tally still has to walk them. It reads the level and the label straight
+   * off the row and never calls deriveVertex, because computing forward kinematics for 15 000
+   * vertices nobody draws is exactly the cost `path` mode exists to avoid. */
+  function tallyVertices() {
+    const tally = { start: 0, goal: 0, section: 0, untagged: 0 };
+    if (!frame) return tally;
+    const vertices = frame.vertices;
+    const vertexCount = frame.vertexCount === undefined ? vertices.length : frame.vertexCount;
+    for (let i = 0; i < vertexCount && i < vertices.length; i++) {
+      const row = vertices[i];
+      const level = packedRows ? row[0] : row.level || 0;
+      if (!visible(level)) continue;
+      let tree = packedRows ? undefined : row.tree;
+      if (typeof tree !== 'string' || tree.length === 0) {
+        tree = TREE_CODES[packedRows ? row[1] : row.component || 0] || 'untagged';
+      }
+      tally[tally[tree] === undefined ? 'untagged' : tree]++;
+    }
+    return tally;
   }
 
   function drawStatic(ctx, project) {
@@ -246,31 +284,46 @@ export function createTracePlayer({ canvas, scene } = {}) {
     const edges = frame.edges || [];
     const vertexCount = frame.vertexCount === undefined ? vertices.length : frame.vertexCount;
     const edgeCount = frame.edgeCount === undefined ? edges.length : frame.edgeCount;
+    const drawnEdges = Math.min(edgeCount, edges.length);
+    const drawnVertices = Math.min(vertexCount, vertices.length);
 
-    ctx.lineWidth = 0.8;
-    for (let i = 0; i < edgeCount && i < edges.length; i++) {
-      const va = deriveVertex(edges[i][0]);
-      const vb = deriveVertex(edges[i][1]);
-      if (!va || !vb) continue;
-      if (!visible(va.level) || !visible(vb.level)) continue;
-      ctx.strokeStyle = hexToRgba(TREE_COLORS[va.tree] || TREE_COLORS.untagged, 0.25);
-      for (let r = 0; r < va.tips.length && r < vb.tips.length; r++) {
-        const [x0, y0] = project(va.tips[r][0], va.tips[r][1]);
-        const [x1, y1] = project(vb.tips[r][0], vb.tips[r][1]);
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.stroke();
+    /* Dense frames are drawn thinner and fainter: at the ~15 000 vertices scene1/QRRT reaches,
+     * the fixed 0.25 alpha saturates whole regions to flat grey and the graph stops being
+     * readable at all. */
+    const dense = drawnEdges > 2000;
+    const edgeAlpha = dense ? 0.1 : 0.25;
+    const dotRadius = drawnVertices > 4000 ? 1.1 : 1.5;
+
+    if (viewMode === 'graph') {
+      ctx.lineWidth = dense ? 0.6 : 0.8;
+      for (let i = 0; i < drawnEdges; i++) {
+        const va = deriveVertex(edges[i][0]);
+        const vb = deriveVertex(edges[i][1]);
+        if (!va || !vb) continue;
+        if (!visible(va.level) || !visible(vb.level)) continue;
+        ctx.strokeStyle = hexToRgba(TREE_COLORS[va.tree] || TREE_COLORS.untagged, edgeAlpha);
+        for (let r = 0; r < va.tips.length && r < vb.tips.length; r++) {
+          const [x0, y0] = project(va.tips[r][0], va.tips[r][1]);
+          const [x1, y1] = project(vb.tips[r][0], vb.tips[r][1]);
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
       }
     }
 
-    /* `section` last so those configurations stay legible on top of both trees. */
+    /* `section` last so those configurations stay legible on top of both trees. The first of the
+     * two passes also tallies, which is what keeps treeCounts() free. */
+    const tally = { start: 0, goal: 0, section: 0, untagged: 0 };
     for (const sectionLayer of [false, true]) {
-      for (let i = 0; i < vertexCount && i < vertices.length; i++) {
+      for (let i = 0; i < drawnVertices; i++) {
         const v = deriveVertex(i);
-        if (!visible(v.level) || (v.tree === 'section') !== sectionLayer) continue;
+        if (!visible(v.level)) continue;
+        if (!sectionLayer) tally[tally[v.tree] === undefined ? 'untagged' : v.tree]++;
+        if ((v.tree === 'section') !== sectionLayer) continue;
         ctx.fillStyle = hexToRgba(TREE_COLORS[v.tree] || TREE_COLORS.untagged, v.alpha);
-        const radius = v.tree === 'section' ? 2.4 : 1.5;
+        const radius = v.tree === 'section' ? 2.4 : dotRadius;
         for (const [x, y] of v.tips) {
           const [px, py] = project(x, y);
           ctx.beginPath();
@@ -279,38 +332,61 @@ export function createTracePlayer({ canvas, scene } = {}) {
         }
       }
     }
+    counts = tally;
   }
 
-  /* The returned solution drawn as whole arms, in its own green: connected arms versus the
-   * scattered dots of the graph's component tags. */
+  /* One path state's arm for one robot. A solution is a real full-dimension configuration, so
+   * unlike a graph vertex it is never truncated. */
+  function pathArm(q, r) {
+    const robot = sceneData.robots[r];
+    let x = robot.pinnedPosition.x;
+    let y = robot.pinnedPosition.y;
+    let theta = 0;
+    const pts = [[x, y]];
+    for (let j = 0; j < links; j++) {
+      const idx = j * robots + r;
+      if (idx >= q.length) break;
+      theta += q[idx];
+      x += robot.jointLength * Math.cos(theta);
+      y += robot.jointLength * Math.sin(theta);
+      pts.push([x, y]);
+    }
+    return pts;
+  }
+
+  function strokePolyline(ctx, project, pts) {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => {
+      const [px, py] = project(x, y);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+  }
+
+  /* The returned solution, which is already the simplified path (solver.h simplifies in place
+   * before exporting) — there is no raw path to overlay. Drawing every state as a solid arm
+   * turns a dozen states into a scribble of crossing arms, so what carries the motion is the
+   * tip trajectory: one polyline per robot through its chain tip across the states, the first
+   * and last arms solid, the intermediate arms ghosted behind them. */
   function drawPath(ctx, project) {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = hexToRgba(PATH_COLOR, 0.9);
-    ctx.fillStyle = hexToRgba(PATH_COLOR, 0.9);
-    for (const q of path) {
-      for (let r = 0; r < robots; r++) {
-        const robot = sceneData.robots[r];
-        let x = robot.pinnedPosition.x;
-        let y = robot.pinnedPosition.y;
-        let theta = 0;
-        const pts = [[x, y]];
-        for (let j = 0; j < links; j++) {
-          const idx = j * robots + r;
-          if (idx >= q.length) break;
-          theta += q[idx];
-          x += robot.jointLength * Math.cos(theta);
-          y += robot.jointLength * Math.sin(theta);
-          pts.push([x, y]);
-        }
-        ctx.beginPath();
-        pts.forEach(([ax, ay], i) => {
-          const [px, py] = project(ax, ay);
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        });
-        ctx.stroke();
-        for (const [ax, ay] of pts) {
-          const [px, py] = project(ax, ay);
+    const last = path.length - 1;
+    for (let r = 0; r < robots; r++) {
+      const arms = path.map((q) => pathArm(q, r));
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = hexToRgba(PATH_COLOR, 0.15);
+      for (let i = 1; i < last; i++) strokePolyline(ctx, project, arms[i]);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = hexToRgba(PATH_COLOR, 1);
+      strokePolyline(ctx, project, arms.map((pts) => pts[pts.length - 1]));
+
+      ctx.fillStyle = hexToRgba(PATH_COLOR, 1);
+      for (const i of last > 0 ? [0, last] : [0]) {
+        strokePolyline(ctx, project, arms[i]);
+        for (const [x, y] of arms[i]) {
+          const [px, py] = project(x, y);
           ctx.beginPath();
           ctx.arc(px, py, 2, 0, 2 * Math.PI);
           ctx.fill();
@@ -325,8 +401,9 @@ export function createTracePlayer({ canvas, scene } = {}) {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const project = projector(bounds, w, h);
+    counts = null;
     drawStatic(ctx, project);
-    if (frame) drawFrame(ctx, project);
+    if (frame && viewMode !== 'path') drawFrame(ctx, project);
     if (path && path.length > 0) drawPath(ctx, project);
   }
 
@@ -341,6 +418,9 @@ export function createTracePlayer({ canvas, scene } = {}) {
         packedRows = next.vertices.length > 0 && Array.isArray(next.vertices[0]);
       }
       frame = next;
+      /* mlmp.trace/1 spells it tree_source; the docs player passes the fixture's top-level value
+       * through as treeSource. Absent means the frame predates the field, i.e. planner-tagged. */
+      treeSource = next.treeSource || next.tree_source || 'planner';
       redraw();
     },
 
@@ -354,6 +434,15 @@ export function createTracePlayer({ canvas, scene } = {}) {
       levels = next || null;
     },
 
+    /* 'graph' | 'vertices' | 'path'. The page redraws; this only records the choice, like
+     * setLevels. */
+    setViewMode(mode) {
+      if (!VIEW_MODES.includes(mode)) {
+        throw new Error(`setViewMode: unknown mode ${mode}`);
+      }
+      viewMode = mode;
+    },
+
     showPath(next) {
       path = next && next.length > 0 ? next : null;
     },
@@ -365,6 +454,8 @@ export function createTracePlayer({ canvas, scene } = {}) {
       derived = [];
       cacheSource = null;
       path = null;
+      counts = null;
+      treeSource = 'planner';
       redraw();
     },
 
@@ -389,6 +480,17 @@ export function createTracePlayer({ canvas, scene } = {}) {
       return links;
     },
 
+    /* Tree membership of the vertices actually drawn for the current frame — the level filter
+     * and the frame's vertexCount prefix both apply. Pages dim legend entries that read 0. */
+    treeCounts() {
+      if (counts === null) counts = tallyVertices();
+      return { ...counts };
+    },
+
+    get treeSource() {
+      return treeSource;
+    },
+
     destroy() {
       sceneData = null;
       bounds = null;
@@ -396,6 +498,7 @@ export function createTracePlayer({ canvas, scene } = {}) {
       path = null;
       derived = [];
       cacheSource = null;
+      counts = null;
     },
   };
 }

@@ -11,9 +11,12 @@ import { readFileSync } from 'node:fs';
 
 import {
   PADDING,
+  PATH_COLOR,
   TREE_CODES,
   TREE_COLORS,
   chainTips,
+  createTracePlayer,
+  hexToRgba,
   levelAlpha,
   sceneBounds,
 } from '../src/renderer.js';
@@ -23,6 +26,46 @@ const links = scene.metadata.n;
 const robots = scene.robots.length;
 assert.equal(links, 4);
 assert.equal(robots, 2);
+
+/* A canvas that records what it was asked to paint. Groups 7-9 exercise the player itself and
+ * not just its pure helpers, and node has no DOM. */
+function stubCanvas() {
+  const ops = [];
+  const ctx = {
+    lineWidth: 0,
+    fillStyle: '',
+    strokeStyle: '',
+    setTransform() {},
+    clearRect() {},
+    beginPath() {},
+    closePath() {},
+    moveTo() {},
+    lineTo() {},
+    fill() {},
+    stroke() {
+      ops.push({ op: 'stroke', style: ctx.strokeStyle });
+    },
+    arc() {
+      ops.push({ op: 'arc', style: ctx.fillStyle });
+    },
+  };
+  return {
+    ops,
+    canvas: {
+      width: 0,
+      height: 0,
+      getBoundingClientRect: () => ({ width: 240, height: 240 }),
+      getContext: () => ctx,
+    },
+  };
+}
+
+/* 'rgba(31, 119, 180' — the alpha varies with level and layer, the colour identifies the layer. */
+const rgb = (hex) => hexToRgba(hex, 1).replace(/, 1\)$/, '');
+const countOps = (ops, kind, hex) =>
+  ops.filter((o) => o.op === kind && o.style.startsWith(rgb(hex))).length;
+
+const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
 
 /* 1. Truncation: a level-0 vertex owns link 0 only, so anything above it is identity-fibre
  *    padding and must not reach the tip. */
@@ -112,4 +155,102 @@ assert.equal(robots, 2);
   assert.equal(levelAlpha(3, 4), 1);
 }
 
-console.log('renderer.test.mjs: 6 groups ok');
+/* 7. View modes. The grey edge web is what collapses a dense graph into a blob, so `vertices`
+ *    must drop the edges while keeping the dots and `path` must drop the graph entirely — and
+ *    the solution has to survive both. */
+{
+  const { canvas, ops } = stubCanvas();
+  const player = createTracePlayer({ canvas, scene });
+  const frame = {
+    vertices: [
+      { level: 3, component: 1, q: q8(0.1) },
+      { level: 3, component: 2, q: q8(0.2) },
+    ],
+    edges: [[0, 1]],
+  };
+  player.showPath([q8(0), q8(0.05)]);
+
+  const draw = (mode) => {
+    ops.length = 0;
+    player.setViewMode(mode);
+    player.pushFrame(frame);
+    return {
+      edges: countOps(ops, 'stroke', TREE_COLORS.start),
+      dots: countOps(ops, 'arc', TREE_COLORS.goal),
+      path: countOps(ops, 'stroke', PATH_COLOR),
+    };
+  };
+
+  const graph = draw('graph');
+  assert.ok(graph.edges > 0 && graph.dots > 0 && graph.path > 0, 'graph mode drew nothing');
+
+  const vertices = draw('vertices');
+  assert.equal(vertices.edges, 0, 'vertices mode still drew the edge web');
+  assert.equal(vertices.dots, graph.dots, 'vertices mode lost the dots');
+  assert.equal(vertices.path, graph.path, 'vertices mode lost the solution');
+
+  const pathOnly = draw('path');
+  assert.equal(pathOnly.edges, 0);
+  assert.equal(pathOnly.dots, 0, 'path mode still drew graph vertices');
+  assert.equal(pathOnly.path, graph.path, 'path mode lost the solution it is named after');
+
+  assert.throws(() => player.setViewMode('blob'), /unknown mode/);
+}
+
+/* 8. treeCounts counts the vertices actually drawn — the level filter and the frame's
+ *    vertexCount prefix both apply. A legend dimmed from a tally that ignored either would
+ *    claim a colour is absent while it is on screen. */
+{
+  const { canvas } = stubCanvas();
+  const player = createTracePlayer({ canvas, scene });
+  const frame = {
+    vertices: [
+      { level: 0, component: 1, q: [0.1, 0.2] },
+      { level: 3, component: 2, q: q8(0.2) },
+      { level: 3, component: 3, q: q8(0.3) },
+      { level: 3, component: 0, q: q8(0.4) },
+    ],
+    edges: [],
+  };
+  player.pushFrame(frame);
+  assert.deepEqual(player.treeCounts(), { start: 1, goal: 1, section: 1, untagged: 1 });
+
+  player.setLevels(new Set([3]));
+  player.redraw();
+  assert.deepEqual(
+    player.treeCounts(),
+    { start: 0, goal: 1, section: 1, untagged: 1 },
+    'the level filter did not reach the tally'
+  );
+
+  player.setLevels(null);
+  player.pushFrame({ ...frame, vertexCount: 2 });
+  assert.deepEqual(
+    player.treeCounts(),
+    { start: 1, goal: 1, section: 0, untagged: 0 },
+    'the vertexCount prefix did not reach the tally'
+  );
+
+  /* `path` draws no vertices, so this answer comes from the standalone walk, not drawFrame. */
+  player.setViewMode('path');
+  player.redraw();
+  assert.deepEqual(player.treeCounts(), { start: 1, goal: 1, section: 0, untagged: 0 });
+}
+
+/* 9. tree_source. The committed fixtures carry none and are BiQRRT/QRRT runs that tagged their
+ *    own trees, so an absent field must read as 'planner' — claiming 'derived' there would
+ *    misattribute the planner's own labels to solver.h's connectivity fallback. */
+{
+  const { canvas } = stubCanvas();
+  const player = createTracePlayer({ canvas, scene });
+  const vertices = [{ level: 0, component: 1, q: [0.1, 0.2] }];
+  player.pushFrame({ vertices, edges: [] });
+  assert.equal(player.treeSource, 'planner');
+  player.pushFrame({ vertices, edges: [], treeSource: 'derived' });
+  assert.equal(player.treeSource, 'derived');
+  /* A live mlmp.trace/1 frame reaches pushFrame verbatim, spelling it tree_source. */
+  player.pushFrame({ vertices, edges: [], tree_source: 'planner' });
+  assert.equal(player.treeSource, 'planner');
+}
+
+console.log('renderer.test.mjs: 9 groups ok');
