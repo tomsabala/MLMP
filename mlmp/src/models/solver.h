@@ -347,8 +347,14 @@ private:
      * Measured, not guessed: OMPL's default longestValidSegmentFraction of 0.01 over a
      * 6-DOF arm's ~29 rad extent gives a 0.29 rad step, which at the UR5's ~0.5 m reach
      * sweeps ~0.14 m between checks. A BiQRRT solution produced at that resolution
-     * contained a configuration this very checker rejects. 0.02 rad sweeps ~1 cm, which
-     * is below the thinnest obstacle in the committed scene.
+     * contained a configuration this very checker rejects.
+     *
+     * The step is a distance in the L2 joint metric, so one check covers any dq with
+     * ||dq||_2 <= step and the Cartesian sweep is bounded by sigma_max(J_p(q)) * step,
+     * not by any single-axis reach. Sampled over 400 in-bounds configurations,
+     * sigma_max peaks at 1.129 m/rad, so 0.02 rad sweeps up to ~2.3 cm. The committed
+     * scene's floor is a 0.4 m slab (top surface still at -0.01) and its wall is 0.06 m,
+     * so no obstacle is thin enough for that sweep to tunnel through.
      *
      * The planar path deliberately keeps OMPL's default: changing it would move every
      * pinned planar number, and Track B owns that measurement. */

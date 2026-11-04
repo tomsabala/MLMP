@@ -10,8 +10,10 @@ env:
   # BiQRRT only: QRRT solved no scene 3/3, its best was scene1 2/3 at 30 s, so gating on
   # it would be flaky. Tracked as an open item in Phase 2 of ROADMAP.md.
   SOLVE_SCENE: scene1.json
-  # URDF scene: one 6-DOF UR5 that must swing around a radial wall. BiQRRT measured 3/3
-  # at --time-limit 1 (seeds 42, 7, 99); the gate budget is twice that.
+  # URDF scene: one 6-DOF UR5 that must swing around a radial wall. The gate is seed 42,
+  # which solves 3/3 in ~0.03 s — a ~70x margin on the 2 s budget. Other seeds are not
+  # gated and are not uniform: re-measured locally at --time-limit 1, seed 99 solves 3/3
+  # (~0.71 s) and seed 7 solves 0/3 even at 2 s. Keep the gate on seed 42.
   URDF_SCENE: ur5_scene1.json
   URDF_SOLVE_BUDGET: "2"
   # Planar regression pin: the planar path must not move when the URDF path is touched.

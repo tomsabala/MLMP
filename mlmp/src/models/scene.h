@@ -12,6 +12,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -149,28 +150,69 @@ private:
     std::shared_ptr<const UrdfRobot> urdfRobot_;
 #endif
 
-    /* Resolution order for a URDF or other asset referenced from a scene file:
-     * absolute path, then relative to the scene's own directory, then
-     * $MLMP_SCENE_DIR. The dev tree hits the second, the published image the third. */
+    /* True when `candidate` is `base` itself or lies beneath it. Compared component by
+     * component, so "/opt/mlmp/scenes-evil" does not pass for base "/opt/mlmp/scenes".
+     * Both arguments must already be canonical. */
+    static bool isInsideBase(const std::filesystem::path& base,
+                             const std::filesystem::path& candidate) {
+        auto b = base.begin();
+        auto c = candidate.begin();
+        for (; b != base.end(); ++b, ++c) {
+            if (c == candidate.end() || *c != *b) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /* Resolves `ref` under one base directory. Returns an empty string when the asset is
+     * absent or when it escapes `base` (`..` segments, or a symlink pointing out of it).
+     * The caller turns every such outcome into the same message, so nothing here leaks
+     * whether a rejected path exists on the host. */
+    static std::string resolveUnderBase(const std::filesystem::path& base,
+                                        const std::filesystem::path& ref) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path canonicalBase = fs::weakly_canonical(base, ec);
+        if (ec) {
+            return {};
+        }
+        const fs::path candidate = fs::weakly_canonical(canonicalBase / ref, ec);
+        if (ec || !isInsideBase(canonicalBase, candidate)) {
+            return {};
+        }
+        return fs::exists(candidate, ec) && !ec ? candidate.string() : std::string();
+    }
+
+    /* Resolution order for a URDF or other asset referenced from a scene file: relative
+     * to the scene's own directory, then $MLMP_SCENE_DIR. The dev tree hits the first,
+     * the published image the second ($MLMP_SCENE_DIR=/opt/mlmp/scenes, ref
+     * "robots/ur5.urdf").
+     *
+     * Scene JSON is untrusted input — solver.h commits to a future Emscripten entry
+     * point — so a reference may not name an absolute path and may not climb out of the
+     * base it resolves against. Every rejection shares one message: distinguishing
+     * "exists but is not a URDF" from "unable to resolve" would be a file-existence
+     * oracle over the whole host filesystem. */
     static std::string resolveAssetPath(const std::string& sceneFile, const std::string& ref) {
         namespace fs = std::filesystem;
         const fs::path refPath(ref);
         if (refPath.is_absolute()) {
-            return refPath.string();
+            throw std::runtime_error("asset path must be relative: " + ref);
         }
 
         const fs::path sceneDir = fs::path(sceneFile).parent_path();
         if (!sceneDir.empty()) {
-            const fs::path candidate = sceneDir / refPath;
-            if (fs::exists(candidate)) {
-                return candidate.string();
+            const std::string resolved = resolveUnderBase(sceneDir, refPath);
+            if (!resolved.empty()) {
+                return resolved;
             }
         }
 
         if (const char* root = std::getenv("MLMP_SCENE_DIR")) {
-            const fs::path candidate = fs::path(root) / refPath;
-            if (fs::exists(candidate)) {
-                return candidate.string();
+            const std::string resolved = resolveUnderBase(fs::path(root), refPath);
+            if (!resolved.empty()) {
+                return resolved;
             }
         }
 
@@ -232,6 +274,14 @@ private:
 #endif
     }
 
+    /* A non-positive or non-finite extent becomes a degenerate FCL shape that collides
+     * with nothing, so an obstacle the scene declared would be silently unenforced. */
+    static void requirePositiveExtent(double value, const std::string& what) {
+        if (!std::isfinite(value) || value <= 0.0) {
+            throw std::runtime_error("obstacle3d requires a finite positive " + what);
+        }
+    }
+
     void loadObstacles3d(const nlohmann::json& json) {
         for (const auto& entry : json.value("obstacles3d", nlohmann::json::array())) {
             Obstacle3d obstacle;
@@ -246,11 +296,17 @@ private:
                 if (!entry.contains("size")) {
                     throw std::runtime_error("box obstacle3d requires size");
                 }
+                requirePositiveExtent(obstacle.size[0], "box size x");
+                requirePositiveExtent(obstacle.size[1], "box size y");
+                requirePositiveExtent(obstacle.size[2], "box size z");
             } else if (obstacle.type == "sphere") {
                 obstacle.radius = entry.at("radius").get<double>();
+                requirePositiveExtent(obstacle.radius, "sphere radius");
             } else if (obstacle.type == "cylinder") {
                 obstacle.radius = entry.at("radius").get<double>();
                 obstacle.length = entry.at("length").get<double>();
+                requirePositiveExtent(obstacle.radius, "cylinder radius");
+                requirePositiveExtent(obstacle.length, "cylinder length");
             } else {
                 throw std::runtime_error("unknown obstacle3d type: " + obstacle.type);
             }

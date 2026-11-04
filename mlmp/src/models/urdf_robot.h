@@ -205,6 +205,12 @@ inline std::shared_ptr<const UrdfRobot> UrdfRobot::load(const std::string& path)
                     }
                     uj.lower = joint->limits->lower;
                     uj.upper = joint->limits->upper;
+                    /* setBounds would otherwise reject these deep inside OMPL with
+                     * "Bounds for real vector space seem to be incorrect"; a malformed
+                     * asset is a usage condition and deserves our own message. */
+                    if (!(uj.lower < uj.upper)) {
+                        throw UnsupportedUrdf("inverted joint limits for " + joint->name);
+                    }
                 }
                 robot->joints.push_back(std::move(uj));
                 pending = Eigen::Isometry3d::Identity();
@@ -220,6 +226,12 @@ inline std::shared_ptr<const UrdfRobot> UrdfRobot::load(const std::string& path)
 
     if (robot->joints.empty()) {
         throw UnsupportedUrdf("URDF has no actuated joints: " + path);
+    }
+    /* With no shapes at all, both loops in UrdfValidityChecker::isValid are empty and it
+     * returns true unconditionally — a robot buried in an obstacle would report an exact
+     * solution. A single link without <collision> stays legal; a robot-wide zero is not. */
+    if (robot->shapes.empty()) {
+        throw UnsupportedUrdf("URDF has no <collision> geometry: " + path);
     }
 
     return robot;
