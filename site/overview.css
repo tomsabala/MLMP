@@ -1,0 +1,59 @@
+/* The typographic base is docs/style.css verbatim — the overview, the trace player and the
+ * playground are three pages of one site, so they share a body measure and a type ramp.
+ * Everything below the base is what this page alone needs: the two demo cards, the hero
+ * image and a plain table. No font import and no script: this file is the whole design. */
+
+:root { color-scheme: light dark; }
+
+body {
+  margin: 0 auto;
+  padding: 1.25rem;
+  max-width: 1120px;
+  font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+h1 { font-size: 1.3rem; margin: 0 0 .35rem; }
+h2 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+header p { margin: 0 0 1rem; max-width: 70ch; opacity: .8; }
+p, li { max-width: 80ch; }
+
+.demos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+
+/* The whole card is the link, so the hit area matches what it looks like. */
+.demos a {
+  display: block;
+  border: 1px solid rgba(128, 128, 128, .4);
+  border-radius: 6px;
+  padding: .9rem 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.demos a:hover, .demos a:focus-visible { border-color: rgba(128, 128, 128, .9); }
+.demos h3 { margin: 0 0 .35rem; font-size: 1rem; }
+.demos p { margin: 0; opacity: .85; }
+
+img.hero { width: 100%; height: auto; border-radius: 6px; }
+figure { margin: 0; }
+figcaption { margin-top: .4rem; font-size: .88rem; opacity: .85; }
+
+table { border-collapse: collapse; margin: .5rem 0; }
+th, td {
+  text-align: left;
+  padding: .3rem .6rem;
+  border-bottom: 1px solid rgba(128, 128, 128, .3);
+}
+
+pre {
+  overflow-x: auto;
+  padding: .6rem .75rem;
+  border: 1px solid rgba(128, 128, 128, .4);
+  border-radius: 6px;
+}
+
+footer { margin-top: 1.5rem; font-size: .85rem; opacity: .75; }

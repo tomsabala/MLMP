@@ -1,0 +1,64 @@
+# The site, served where apps.tom-sabala.dev's broker will ask for it.
+#
+# Caddy rather than nginx because the gateway this image is deployed into runs
+# Caddy, and `gateway/caddy/launcher-static.caddy` over there is already the
+# house pattern for serving a static build. One config language on that box.
+#
+# THE PREFIX IS NOT STRIPPED BY THE GATEWAY. `gateway/broker/lib/paths.mjs`
+# keeps `/a/<slug>` in the proxied target, because an app image is normally
+# built with `basePath=/a/<slug>` and expects to see its own prefix. This site
+# has no build-time base path to bake in - every URL the three pages emit is
+# document-relative - so `handle_path` strips the prefix here and serves the
+# same files beneath it. That is the only place the slug appears in this repo.
+#
+# Port 8080 and an unprivileged user: the broker starts every instance with
+# `CapDrop: ALL`, so binding 80 would mean handing CAP_NET_BIND_SERVICE back
+# for nothing.
+{
+	admin off
+	auto_https off
+	persist_config off
+	log {
+		output stderr
+		format console
+		level WARN
+	}
+}
+
+:8080 {
+	encode zstd gzip
+
+	# The image's HEALTHCHECK and the broker's `readyPath` both land here. It
+	# is outside the site tree on purpose: it answers whether the server is
+	# up, independently of any file being where it is expected.
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	# Directory URLs without a trailing slash: file_server's own canonical
+	# redirect runs after handle_path has stripped /a/mlmp, so it would send
+	# the visitor to /live/ and off this app entirely. These three are the only
+	# directories the site has.
+	redir /a/mlmp /a/mlmp/ 301
+	redir /a/mlmp/explorer /a/mlmp/explorer/ 301
+	redir /a/mlmp/live /a/mlmp/live/ 301
+
+	handle_path /a/mlmp/* {
+		root * /srv/site
+
+		# No filename in this site is content-hashed (traces/*.json,
+		# src/mlmp.wasm, src/main.js are all stable names), so nothing may be
+		# cached immutably; ETag revalidation plus `encode` is what keeps the
+		# 11 MB of trace fixtures cheap.
+		header Cache-Control "no-cache"
+
+		file_server
+	}
+
+	# A visitor who reaches the container directly - `docker run -p`, or a route
+	# that lost its prefix - is pointed at the site rather than given a bare 404
+	# from a path that does not exist inside this image.
+	redir / /a/mlmp/ 302
+
+	respond 404
+}

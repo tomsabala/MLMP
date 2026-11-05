@@ -39,6 +39,15 @@ files beside the fixtures are records of one recording, not pinned targets. All 
 with a derivation-capable image, so the BiQRRT fixtures carry `"tree_source": "planner"` and the
 QRRT ones `"derived"`.
 
+The same tree is published as an app image (`docker/app/Dockerfile`, `docker/app/Caddyfile`)
+by `.github/workflows/apps-image.yml` to `ghcr.io/tomsabala/mlmp:apps-mount-<sha>` and served at
+`https://apps.tom-sabala.dev/a/mlmp/`: `site/` at the root, `docs/` under `/explorer/`,
+`web/dist` under `/live/`. The container's Caddy strips the `/a/mlmp` prefix, so the slug
+appears in `docker/app/Caddyfile` and nowhere else; `docker/app/Dockerfile.dockerignore` is
+what lets `COPY web/dist/` see the gitignored build output. Deploying a new build means
+bumping the `apps-mount-<sha>` pin in `tom-sabala.dev`'s `frontend/src/apps/apps.json`.
+GitHub Pages is not used.
+
 ## Tests
 
 There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs against the Docker image:

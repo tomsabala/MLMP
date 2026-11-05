@@ -1,29 +1,78 @@
-# Motion Planning Experiment
+# MLMP — multilevel motion planning
+
+**Multi-robot 2D kinematic chains and a 6-DOF UR5 arm, planned on OMPL bundle spaces by a
+custom bidirectional planner — recorded, replayable, and runnable in your browser.**
+
+- **Recorded algorithm comparison:** [Trace Explorer](https://apps.tom-sabala.dev/a/mlmp/explorer/)
+  — replay BiQRRT and QRRT on the same scene and seed, step frame by frame, toggle bundle levels.
+- **Run a planner in your browser:** [Interactive Planner](https://apps.tom-sabala.dev/a/mlmp/live/)
+  — the same C++ solver compiled to WebAssembly; drag an obstacle, pick one of 11 planners,
+  watch the trees grow.
+- Both, with a project overview: <https://apps.tom-sabala.dev/#mlmp>
 
 ![BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget](docs/biqrrt-vs-qrrt.gif)
 
 Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
 seed: blue is the start tree, red the goal tree, purple the graph vertices in neither tree —
 mostly the configurations `findSection()` produces, which exist whether or not the run solved —
-and opacity is the bundle level. `BiQRRT` tags its own trees; every other planner tags
-nothing, so the binary derives the same `start`/`goal` labels from graph connectivity and each
-frame records which of the two it is. Step it frame by frame, pick another scene, switch
-between graph, vertices and path views and toggle levels in the
-[trace player](https://tomsabala.github.io/MLMP/).
+and opacity is the bundle level.
+
+A C++17 CLI on OMPL 1.7.0 that plans for teams of planar kinematic chains and for a URDF-loaded
+6-DOF arm, over OMPL's [`ompl::multilevel`](https://ompl.kavrakilab.org/multiLevelPlanning.html)
+bundle spaces, with `BiQRRT` — a bidirectional bundle-space planner written for this project —
+against five multilevel and seven single-level baselines. The same solver compiles to
+WebAssembly and runs in the browser with no server behind it.
 
 ```sh
 docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10
 ```
-
-A 2D multi-robot kinematic-chain motion-planning experiment built on OMPL's
-[`ompl::multilevel`](https://ompl.kavrakilab.org/multiLevelPlanning.html) bundle-space planners,
-plus a custom bidirectional bundle-space planner, `BiQRRT`.
 
 The work follows [Multilevel motion planning: A fiber bundle formulation](https://journals.sagepub.com/doi/full/10.1177/02783649231209337)
 by [Andreas Orthey](https://scholar.google.com/citations?user=bQKreEMAAAAJ), Sohaib Akbar, and
 [Prof. Marc Toussaint](https://scholar.google.com/citations?user=t2X4Mg8AAAAJ&hl=iw).
 
 See [ROADMAP.md](ROADMAP.md) for where this is going.
+
+## What I implemented
+
+OMPL 1.7.0 supplies the bundle-space machinery: `BundleSpaceSequence`, `BundleSpaceGraph`, the
+projections between levels, `QRRT`/`QRRTStar`/`QMP`/`QMPStar`, the single-level baselines and
+path simplification. Everything below is this repository's.
+
+**`BiQRRT`, a bidirectional bundle-space planner** (`mlmp/src/planner/`). `QRRT` grows one tree
+per bundle level outward from the start and reaches the goal through random sampling and the
+level's `findSection()` lift. `BiQRRTImpl` subclasses `BundleSpaceGraph` and keeps **two**
+nearest-neighbour structures per level, `treeStart_` and `treeGoal_`. Each `grow()` call swaps
+the active tree, samples the bundle, clips the extension to `maxDistance_`, steers, adds the new
+vertex to the active tree — and then tries to steer straight from it to its nearest neighbour in
+the *other* tree. A successful steer adds that edge and marks the level solved
+(`BiQRRTImpl.cpp:117-174`). Both trees exist at every level of the hierarchy, so the
+bidirectional search and the multilevel decomposition compose rather than compete. Also mine:
+the `vStart_` fix in `init()` — the base `init()` assigns it, the override did not, and
+`getSolution()` indexes the graph with it, which was a deterministic per-scene segfault.
+
+**Trees you can see.** `BiQRRTImpl::getPlannerData` tags every vertex the level contributed as
+`start` (1), `goal` (2) or `section` (3), which is what gives the viewers their colours. No
+other planner tags anything, so `Solver::captureFrame` derives the same `start`/`goal` labels
+with a breadth-first search from the run's start and goal vertices over the frame's own edges,
+and every frame records which of the two it was in `tree_source`. That is why the QRRT panel is
+coloured at all.
+
+**The contract and the tooling around it**: `Solver::solve(const RunOptions&) -> RunResult` with
+no I/O of its own, one `mlmp.run/1` JSON object per run, the `mlmp.trace/1` JSONL recorder, the
+`mlmp.traceviz/1` packer that turns a 0.3–0.9 GB raw recording into a sub-1.5 MB fixture, the
+trace player, the Emscripten port and its worker-based playground, and the URDF path — a URDF
+flattened to a serial chain, FCL narrowphase collision checking, and a collision step pinned to
+0.02 rad because OMPL's default resolution let a 6-DOF solution contain a state its own checker
+rejects.
+
+**What this does not claim.** BiQRRT solved `scene1` and `scene5` 3/3 at a 10 s budget;
+`scene4` and `scene6` were solved 0/3 by both BiQRRT and QRRT. Those are stopwatch observations
+on one host, not a benchmark, and there is a known confound: `BiQRRTImpl::setup()` pins the
+extension step to `0.1` when no caller sets a range, while QRRT's `SelfConfig` default measured
+1.78–3.55 across `scene1`'s levels, so part of any gap may be step size rather than
+bidirectionality. Turning that into a declared parameter and running a real campaign with
+confidence intervals is Track F and Phase 2 of the roadmap.
 
 ## Usage
 
@@ -43,12 +92,14 @@ See [ROADMAP.md](ROADMAP.md) for where this is going.
 ### Output
 
 A run prints exactly one `mlmp.run/1` JSON object on stdout; every log line goes to stderr, so
-`--verbose` never corrupts the result. The keys are `schema`, `planner`, `scene`, `scene_path`,
-`robots`, `links`, `seed`, `time_limit_s`, `ompl_version`, `solved`, `exact`, `status`,
-`time_solve_s`, `time_first_solution_s`, `time_simplify_s`, `solution_events`,
-`path_length_raw`, `path_length_simplified`, `path_states`, `path`, `graph_vertices`,
-`graph_edges`, `state_validity_checks`, `states_sampled`, `motion_checks`,
-`motion_checks_valid` and `trace`.
+`--verbose` never corrupts the result. The keys, in order, are `schema`, `planner`, `scene`,
+`scene_path`, `robots`, `links`, `model`, `dof`, `robot_model`, `robot_urdf`, `seed`,
+`time_limit_s`, `ompl_version`, `solved`, `exact`, `status`, `time_solve_s`,
+`time_first_solution_s`, `time_simplify_s`, `solution_events`, `path_length_raw`,
+`path_length_simplified`, `path_states`, `path`, `graph_vertices`, `graph_edges`,
+`state_validity_checks`, `states_sampled`, `motion_checks`, `motion_checks_valid` and `trace`.
+`model` is `planar` or `urdf`; `dof` is `robots × links` for planar scenes and the actuated
+joint count for URDF scenes; `robot_model`/`robot_urdf` are null outside URDF runs.
 
 `path` is the *simplified* path — the solver runs `simplifyMax` on the solution in place
 before exporting the states, so `path` matches `path_length_simplified`, not
@@ -124,6 +175,22 @@ development scenes under `dev/`. Of those, BiQRRT solved `scene1` and `scene5` 3
 at that budget, so expect exit 1 there. Those are stopwatch observations on one host, not a
 benchmark — the real numbers are Phase 2 of the roadmap.
 
+### URDF scenes
+
+A scene whose `metadata.model` is `"urdf"` takes a parallel path: one robot, a serial chain of
+actuated joints read from a URDF, 6-D joint-space planning over the same bundle hierarchy, and
+FCL narrowphase collision checking. One such scene is baked into the image, `ur5_scene1.json`,
+over the vendored `mlmp/src/inputs/robots/ur5.urdf` (six actuated joints):
+
+```sh
+docker run --rm ghcr.io/tomsabala/mlmp:latest -a BiQRRT -i ur5_scene1.json -t 2 --seed 42
+```
+
+Branched URDFs, meshes and prismatic joints are rejected with `error.kind == "usage"`. The
+whole path is behind the `MLMP_ENABLE_URDF` CMake option (default ON; needs `liburdfdom-dev`
+and `libfcl-dev`), and with it off a URDF scene exits 2. `mlmp/tools/renderUrdf.py` turns a
+run's stdout into an MP4 and a GIF through MuJoCo.
+
 ## Building
 
 ### Image
@@ -160,7 +227,21 @@ cmake --build ompl/build --target ompl -j && sudo cmake --install ompl/build
 
 The binary lands at `mlmp/build/mlmp`.
 
-## Trace player
+## The hosted site
+
+Three surfaces on one origin, served by one container image:
+
+| Route | What it is |
+|---|---|
+| <https://apps.tom-sabala.dev/a/mlmp/> | Project overview (`site/`) |
+| <https://apps.tom-sabala.dev/a/mlmp/explorer/> | Trace player (`docs/`) |
+| <https://apps.tom-sabala.dev/a/mlmp/live/> | WebAssembly playground (`web/dist`) |
+
+The image is built from [`docker/app/Dockerfile`](docker/app/Dockerfile) and published by
+[`.github/workflows/apps-image.yml`](.github/workflows/apps-image.yml) as
+`ghcr.io/tomsabala/mlmp:apps-mount-<sha>`, one immutable tag per commit. Deploying a new build
+means bumping that pin in `tom-sabala.dev`'s `frontend/src/apps/apps.json`; the gateway never
+builds and never follows a moving tag.
 
 [`docs/`](docs/) is a static scrubber page — no build step, no dependencies — that replays the
 committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, toggles

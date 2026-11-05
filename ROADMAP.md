@@ -328,9 +328,14 @@ touch, and what makes it done.
   padding. `showPath` uses the untruncated FK, because `mlmp.run/1`'s `path` entries are real
   full-dimension configurations; it draws the ordered chain-tip trajectory through them and
   full arms only at the first and last state, since one arm per waypoint buries the path.
-- **Constraint: one Pages artifact.** `docs/` is the published Pages site today, and the README
-  links its URL. A Pages workflow added here must publish a single artifact containing both
-  surfaces, or it takes the player offline.
+- **Shipped instead: one container image, not Pages.** All three surfaces — the overview page
+  (`site/`), the trace player (`docs/`) and the playground (`web/dist`) — are served by a
+  single static image (`docker/app/`) on `apps.tom-sabala.dev`, published by
+  `.github/workflows/apps-image.yml` as `ghcr.io/tomsabala/mlmp:apps-mount-<sha>` and pinned
+  in that gateway's manifest. GitHub Pages is not used: its workflow never deployed (it failed
+  at `actions/configure-pages` on every run because no Pages site existed), and one artifact
+  per repository was the constraint that made publishing both surfaces awkward in the first
+  place.
 - **Done when.** A visitor edits a scene, picks a planner, and sees the trees grow, on a
   static host that sets no special headers — and the live frames are drawn by the same module
   the committed fixtures are.
@@ -338,8 +343,9 @@ touch, and what makes it done.
   Boost-component-free OMPL 1.7.0 built with `emscripten/emsdk:6.0.13`), `mlmp/src/wasm/entry.cpp`
   behind an `if(EMSCRIPTEN)` branch in `mlmp/CMakeLists.txt`, the `web/` playground (module
   worker + obstacle editor + newest-edit solve queue), `web/src/renderer.js` with its verified
-  `docs/renderer.js` copy, a `wasm` CI job and `pages.yml` publishing `docs/` with the
-  playground at `/live/`.
+  `docs/renderer.js` copy, a `wasm` CI job and `apps-image.yml` publishing one static image
+  serving the overview at `/a/mlmp/`, the trace player at `/a/mlmp/explorer/` and the
+  playground at `/a/mlmp/live/`.
 - **Measured, not estimated.** Payload `gzip -9`: `mlmp.wasm` 454 511 B + `mlmp.mjs` 22 278 B =
   476 789 B, 9.1% of the 5 MiB gate. Throughput on one host, traced BiQRRT/`scene1`/seed 42/10 s:
   native 8 104 vertices and 23 221 samples versus wasm 5 379 and 14 982 — wasm runs at ≈0.65×
@@ -376,8 +382,9 @@ is an unfalsifiable claim, which is the whole reason Phase 2 exists.
 
 Two edges were added by Track A's handoff. Track E's `web/src/renderer.js` precedes Track A's
 retrofit of `docs/app.js`, which is the reverse of the original dependency. And a
-Pages-publishing workflow in Track E precedes nothing, but must not land without also
-publishing `docs/` — a repository has one Pages source.
+publishing workflow in Track E precedes nothing, but must not land without also publishing
+`docs/` — all three surfaces ship as one image (`docker/app/`, `apps-image.yml`), so dropping
+one of them from that image takes it offline.
 
 ---
 
