@@ -31,13 +31,33 @@ object from a URDF scene into MuJoCo and writes an MP4 and a GIF. It needs
 `pip install 'mujoco>=3.2' imageio imageio-ffmpeg` plus apt `libosmesa6 libgl1`, and is not in
 the image.
 
-`docs/` is a dependency-free trace player (`docs/app.js`) over 12 committed `mlmp.traceviz/1`
+`docs/` is a dependency-free trace explorer (`docs/app.js`) over 12 committed `mlmp.traceviz/1`
 fixtures in `docs/traces/`, plus the README GIF. `mlmp/tools/recordTraces.sh` re-records them
-through the Docker image and `mlmp/tools/packTrace.py`; `mlmp/tools/traceGif.py` renders the GIF
-from the committed fixtures alone. A traced run is not byte-reproducible, so the `.run.json`
-files beside the fixtures are records of one recording, not pinned targets. All 12 were recorded
-with a derivation-capable image, so the BiQRRT fixtures carry `"tree_source": "planner"` and the
-QRRT ones `"derived"`.
+through the Docker image and `mlmp/tools/packTrace.py` using the per-scene budget table at the
+top of that script; `mlmp/tools/traceGif.py` renders `docs/solution-motion.gif` (`--mode motion`,
+the default) or the older tree cloud (`--mode trees`) from the committed fixtures alone. A traced
+run is not byte-reproducible, so the `.run.json` files beside the fixtures are records of one
+recording, not pinned targets. All 12 were recorded with a derivation-capable image, so the
+BiQRRT fixtures carry `"tree_source": "planner"` and the QRRT ones `"derived"`. The packed
+fixture holds no solution path — `packTrace.py` copies scalars only — so each page fetches the
+sibling `.run.json` for `path`.
+
+**Both browser surfaces default to playing the solution, not drawing the search.**
+`web/src/renderer.js` (copied byte-identically to `docs/renderer.js`; CI runs `cmp`) has three
+view modes: `motion` animates the arms along `densifyPath`, which mirrors
+`KinematicChainSpace::interpolate` — wrap-aware, so every drawn pose is one the motion validator
+accepted — while `graph` and `vertices` draw the search and are meant to be read one bundle level
+at a time. Layer order is load-bearing: obstacles, graph, start/goal arms, solution. The arms
+used to be drawn first and were invisible under the point cloud. The graph layers stride down to
+`MAX_DOTS` / `MAX_EDGES` instead of saturating. `web/src/cspace.js` (copied to `docs/cspace.js`
+the same way) is the second canvas: for a bundle level whose dimension is exactly 2 — level 0 of
+a two-robot scene, level 1 of a one-robot one — it rasterises the real free/blocked map by
+running a JS port of `KinematicChainValidityChecker::isValidImpl` over a 192x192 grid (~14 ms,
+cached per scene), then draws that level's tree, the higher levels' projections and the solution
+in the same square. Scenes with three or more robots have no 2-D level and the panel says so
+instead of faking a slice. If the C++ checker or `Scene`'s boundary padding changes, `cspace.js`
+must change with it; `web/test/cspace.test.mjs` catches the drift by re-validating ~47 600
+committed fixture vertices against the port.
 
 The same tree is published as an app image (`docker/app/Dockerfile`, `docker/app/Caddyfile`)
 by `.github/workflows/apps-image.yml` to `ghcr.io/tomsabala/mlmp:apps-mount-<sha>` and served at

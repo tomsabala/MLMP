@@ -17,21 +17,25 @@
 <section class="demos">
   <a href="explorer/">
     <h3>Trace Explorer →</h3>
-    <p>Replay recorded BiQRRT and QRRT runs side by side on the same scene and seed. Step frame
-       by frame, toggle bundle levels, switch between graph, vertices and path.</p>
+    <p>Watch the arms play a recorded BiQRRT solution beside QRRT on the same scene and seed,
+       then switch to the search that produced it — one bundle level at a time, in the workspace
+       and in the configuration space the planner really works in.</p>
   </a>
   <a href="live/">
     <h3>Interactive Planner →</h3>
     <p>The same C++ solver compiled to WebAssembly. Drag an obstacle, pick one of 11 planners,
-       set a seed and a budget, and watch the trees grow.</p>
+       set a seed and a budget, watch the trees grow, and see the arms run the solution it
+       finds.</p>
   </a>
 </section>
 
 <figure>
-  <img class="hero" src="explorer/biqrrt-vs-qrrt.gif"
-       alt="BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget">
-  <figcaption>BiQRRT (left) and QRRT (right), scene1, seed 42, 10 s. Blue is the start tree,
-     red the goal tree, purple the graph vertices in neither; opacity is the bundle level.</figcaption>
+  <img class="hero" src="explorer/solution-motion.gif"
+       alt="Two 4-link arms moving along a BiQRRT solution on scene1, past two obstacles">
+  <figcaption>The solution BiQRRT found on scene1 at seed 42, played back. Four simplified path
+     states densified to 73 configurations by the planner's own joint-space interpolation; the
+     thin curves are what each arm's tip traces out. The arms never touch the obstacles, each
+     other, or themselves — that is the entire constraint, in eight dimensions.</figcaption>
 </figure>
 
 <h2>The problem</h2>
@@ -104,15 +108,28 @@
    compete.</p>
 
 <h2>What the visualizations show</h2>
-<p>The Trace Explorer replays the planner's own graph, not a redrawing of the final path: every
-   vertex is one configuration the planner actually committed to, placed at the chain tip of the
-   links its bundle level owns. BiQRRT tags its two trees itself, so blue and red there are the
-   planner's own bookkeeping; QRRT tags nothing, so the binary derives the same labels by
-   breadth-first search from the start and goal vertices over the frame's edges, and every frame
-   records which of the two it was (<code>tree_source</code>: <code>planner</code> or
-   <code>derived</code>). That is also what the side-by-side makes visible: BiQRRT's two fronts
-   meeting, against QRRT's single front and the purple <code>findSection()</code> configurations
-   that exist whether or not a run ever solves.</p>
+<p>Three pictures of the same run, because a planner is three different things at once.</p>
+<p><strong>The motion.</strong> The default view plays the solution as the arms themselves,
+   interpolated in joint space by the same wrap-aware rule
+   (<code>KinematicChainSpace::interpolate</code>) the motion validator checked each segment
+   under — so every pose on screen is one the checker accepted, not a guess between waypoints.
+   It matters: on scene1 the straight workspace lines an earlier version drew between the four
+   simplified path states missed the true tip curve by up to 0.083 units on a scene 1.09 wide,
+   about 46 px at a 600 px canvas.</p>
+<p><strong>The search.</strong> Every vertex is one configuration the planner actually committed
+   to, drawn at the chain tip of the links its bundle level owns — read one level at a time,
+   because all four at once is 37 000 overlapping dots and no information. BiQRRT tags its two
+   trees itself, so blue and red are the planner's own bookkeeping; QRRT tags nothing, so the
+   binary derives the same labels by breadth-first search from the start and goal vertices over
+   the frame's edges, and every frame records which of the two it was
+   (<code>tree_source</code>: <code>planner</code> or <code>derived</code>). The purple
+   <code>findSection()</code> configurations exist whether or not a run ever solves.</p>
+<p><strong>The configuration space itself.</strong> A bundle level whose dimension is two — level
+   0 of a two-robot scene, level 1 of a one-robot scene — can be drawn exactly: both axes are
+   joint angles over [−π, π], and the grey region is computed by running the real collision
+   predicate over a grid, the same segment-intersection test the C++ checker uses. The tree
+   appears there in the space it is actually searched in, and configurations from higher levels
+   project into the same square, because that projection is what a bundle space <em>is</em>.</p>
 
 <h2>What is measured, and what is not</h2>
 <p>BiQRRT solved scene1 and scene5 3/3 at a 10 s budget; scene4 and scene6 were solved 0/3 by

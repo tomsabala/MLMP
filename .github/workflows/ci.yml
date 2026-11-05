@@ -203,10 +203,11 @@ jobs:
           cache-from: type=gha,scope=wasm
           cache-to: type=gha,mode=max,scope=wasm
 
-      - name: Renderer copy check
+      - name: Shared drawing copy check
         run: |
           set -eu
           cmp web/src/renderer.js docs/renderer.js
+          cmp web/src/cspace.js docs/cspace.js
 
       # Group 6 of renderer.test.mjs imports mlmp/tools/traceGif.py to compare the two
       # renderers' shared constants, and that module imports matplotlib, numpy and PIL.
@@ -218,6 +219,14 @@ jobs:
         run: |
           set -eu
           node web/test/renderer.test.mjs
+
+      # The C-space map is a JS port of KinematicChainValidityChecker; the test re-validates
+      # ~47 600 committed fixture vertices through it, so a change to the C++ checker or to
+      # Scene's boundary padding fails here instead of silently drawing a wrong free space.
+      - name: Configuration-space unit test
+        run: |
+          set -eu
+          node web/test/cspace.test.mjs
 
       - name: Payload size gate
         run: |

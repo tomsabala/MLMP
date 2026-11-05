@@ -4,18 +4,20 @@
 custom bidirectional planner — recorded, replayable, and runnable in your browser.**
 
 - **Recorded algorithm comparison:** [Trace Explorer](https://apps.tom-sabala.dev/a/mlmp/explorer/)
-  — replay BiQRRT and QRRT on the same scene and seed, step frame by frame, toggle bundle levels.
+  — play the solution BiQRRT found beside QRRT on the same scene and seed, then step through the
+  search that produced it, one bundle level at a time, in the workspace and in the real
+  configuration space.
 - **Run a planner in your browser:** [Interactive Planner](https://apps.tom-sabala.dev/a/mlmp/live/)
   — the same C++ solver compiled to WebAssembly; drag an obstacle, pick one of 11 planners,
-  watch the trees grow.
+  watch the trees grow and the arms run the solution.
 - Both, with a project overview: <https://apps.tom-sabala.dev/#mlmp>
 
-![BiQRRT (left) and QRRT (right) on scene1, seed 42, 10 s budget](docs/biqrrt-vs-qrrt.gif)
+![Two 4-link arms moving along a BiQRRT solution on scene1](docs/solution-motion.gif)
 
-Both trees of `BiQRRT` growing through the bundle hierarchy beside `QRRT` on the same scene and
-seed: blue is the start tree, red the goal tree, purple the graph vertices in neither tree —
-mostly the configurations `findSection()` produces, which exist whether or not the run solved —
-and opacity is the bundle level.
+The solution `BiQRRT` found on `scene1` at seed 42, played back: four simplified path states
+densified to 73 configurations by the planner's own wrap-aware joint-space interpolation, with
+each arm's tip trace behind it. Neither arm may touch an obstacle, the other arm, or itself —
+that is the whole constraint, and it lives in eight dimensions.
 
 A C++17 CLI on OMPL 1.7.0 that plans for teams of planar kinematic chains and for a URDF-loaded
 6-DOF arm, over OMPL's [`ompl::multilevel`](https://ompl.kavrakilab.org/multiLevelPlanning.html)
@@ -243,25 +245,31 @@ The image is built from [`docker/app/Dockerfile`](docker/app/Dockerfile) and pub
 means bumping that pin in `tom-sabala.dev`'s `frontend/src/apps/apps.json`; the gateway never
 builds and never follows a moving tag.
 
-[`docs/`](docs/) is a static scrubber page — no build step, no dependencies — that replays the
-committed fixtures for any scene with BiQRRT and QRRT side by side, steps frames, toggles
-bundle levels, and switches each panel between `graph + edges`, `vertices only` and
-`path only`. Each panel's caption says whether its tree colours were reported by the planner
-or derived from graph connectivity, because the two panels can disagree: BiQRRT reports, QRRT
-is derived. Regenerate everything after a planner change:
+[`docs/`](docs/) is a static page — no build step, no dependencies — that replays the committed
+fixtures for any scene with BiQRRT and QRRT side by side. Its default view plays the solution:
+the arms themselves, interpolated in joint space by `KinematicChainSpace::interpolate`, the same
+wrap-aware rule the motion validator checked each segment under. Switching to `search tree +
+edges` or `search vertices` shows what the planner explored, one bundle level at a time, and a
+second canvas under each panel draws the scene's 2-D bundle level as a real configuration space
+with its collision region computed from the same segment-intersection predicate the C++ checker
+uses. Each panel's caption says whether its tree colours were reported by the planner or derived
+from graph connectivity, because the two panels can disagree: BiQRRT reports, QRRT is derived.
+Regenerate everything after a planner change:
 
 ```sh
 mlmp/tools/recordTraces.sh mlmp:dev                                  # 12 fixtures + scene copies
-python3 mlmp/tools/traceGif.py --scene scene1 --out docs/biqrrt-vs-qrrt.gif
+python3 mlmp/tools/traceGif.py                                       # docs/solution-motion.gif
 ```
 
-`recordTraces.sh` records each cell at `--seed 42 --time-limit 10 --trace-interval-ms 50`, then
-packs the raw `mlmp.trace/1` stream into the `mlmp.traceviz/1` fixture under `docs/traces/` with
-`mlmp/tools/packTrace.py`. The packing is not cosmetic: every trace frame re-dumps the whole
-planner graph, so a raw 10 s recording is 0.3–0.9 GB, while the packed fixture is under 1.5 MB.
-It stores each vertex once, truncated to the links that vertex's bundle level actually owns —
-the lifted tail above the level is identity-fibre padding that changes every frame — so a frame
-is just a timestamp plus a vertex and edge count.
+`recordTraces.sh` records each cell at `--seed 42` with a per-scene budget and trace interval it
+documents in a table at the top of the script, then packs the raw `mlmp.trace/1` stream into the
+`mlmp.traceviz/1` fixture under `docs/traces/` with `mlmp/tools/packTrace.py`. The packing is not
+cosmetic: every trace frame re-dumps the whole planner graph, so a raw 10 s recording is
+0.3–0.9 GB, while the packed fixture is under 1.5 MB. It stores each vertex once, truncated to
+the links that vertex's bundle level actually owns — the lifted tail above the level is
+identity-fibre padding that changes every frame — so a frame is just a timestamp plus a vertex
+and edge count. The solution itself is not in the packed fixture; the page reads it from the
+sibling `.run.json`, which is why both files are fetched per panel.
 
 All 12 committed fixtures — and the GIF above — were recorded with a derivation-capable image,
 so the BiQRRT half carries the planner's own tags (`"tree_source": "planner"`) and the QRRT half

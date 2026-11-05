@@ -1,21 +1,43 @@
 #!/usr/bin/env python3
-"""Render the README GIF from committed mlmp.traceviz/1 fixtures: BiQRRT left, QRRT right.
+"""Render the project's animated figures from the committed fixtures and run records.
 
-    python3 mlmp/tools/traceGif.py --scene scene1 --out docs/biqrrt-vs-qrrt.gif
+    # the hero picture: both arms playing back a solution
+    python3 mlmp/tools/traceGif.py --mode motion --out docs/solution-motion.gif
+    # the algorithm picture: BiQRRT's two trees beside QRRT's one
+    python3 mlmp/tools/traceGif.py --mode trees --out docs/biqrrt-vs-qrrt.gif
 
-Fixtures come from mlmp/tools/recordTraces.sh (record + pack). Rendering rules here are
-mirrored verbatim in docs/app.js so the GIF and the trace player cannot disagree. Forward
+`motion` reads a scene plus one mlmp.run/1 result and animates every robot along that run's
+solution: arms as real segments, a fading ghost trail, each tip's curve accumulating, and the
+start and goal configurations outlined throughout. The `path` in a run result is the
+*simplified* path — scene1/BiQRRT/seed 42 has four states for an 8-D problem — so consecutive
+states are densified with KinematicChainSpace::interpolate
+(mlmp/src/state/kinematic_chain.h:112-139), which goes the short way round the circle and
+re-wraps into [-PI, PI]; web/src/renderer.js mirrors the same branches as interpolateConfig /
+densifyPath.
+
+Drawing straight chords between those four states instead would be wrong in shape, not in
+length: measured on that solution, robot 0's tip travels 0.875 scene units along the true
+curve against 0.813 along the chords (1.08x), but the curve leaves the chord by up to 0.083 —
+7.6% of the 1.09 x 0.90 scene, ~46 px on a 600 px canvas — and does it where the tip bends
+around an obstacle. Interpolating naively (`from + (to - from) * t`, no wrap) is worse than
+wrong-looking: on this solution joint 0 of robot 0 runs from +PI to -1.27, the short way is
++1.87 rad through the branch cut, and a naive lerp drags it -4.41 rad the other way through
+poses the planner never validated — i.e. straight through an obstacle.
+
+`trees` is the original side-by-side: BiQRRT left, QRRT right, both as projected chain-tip
+clouds. Fixtures come from mlmp/tools/recordTraces.sh (record + pack). Rendering rules there
+are mirrored verbatim in docs/app.js so the GIF and the trace player cannot disagree. Forward
 kinematics follow KinematicChainValidityChecker (mlmp/src/state/kinematic_chain.h:199-222):
 cumulative angles, index q[link*robots+robot], one constant jointLength per robot. A fixture
 vertex at bundle level L stores only its first L+1 links per robot — the tail above L is
 identity-fibre padding, not planner output, and is never drawn.
 
-Colour comes from the vertex's tree NAME, never from the planner name. BiQRRT tags its own
-trees; for every other planner the binary derives start/goal from graph connectivity, and the
-fixture records which of the two in its top-level "tree_source". Fixtures packed before
-derivation existed carry no "tree_source" and leave every non-BiQRRT vertex at component 0,
-so their panel renders in the single untagged grey — re-record with a current image to get a
-blue start tree and a red goal tree on that side.
+Colour in `trees` comes from the vertex's tree NAME, never from the planner name. BiQRRT tags
+its own trees; for every other planner the binary derives start/goal from graph connectivity,
+and the fixture records which of the two in its top-level "tree_source". Fixtures packed
+before derivation existed carry no "tree_source" and leave every non-BiQRRT vertex at
+component 0, so their panel renders in the single untagged grey — re-record with a current
+image to get a blue start tree and a red goal tree on that side.
 """
 import argparse
 import json
@@ -40,6 +62,18 @@ TREE_COLORS = {
     "untagged": "#7f7f7f",
 }
 PADDING = 0.05
+
+# Motion mode. Deliberately outside TREE_COLORS: those four names are the tree vocabulary
+# web/src/renderer.js asserts against (web/test/renderer.test.mjs group 6), and a robot is
+# not a tree.
+ROBOT_COLORS = ("#1c7ed6", "#f76707")
+GHOST_FRAMES = 6
+HOLD_FRAMES = 12
+TWO_PI = 2.0 * math.pi
+# A GIF has no scrubber, so the loop has to read as one gesture: aim for this and let the
+# frame delay fall out of however many frames the densified path needs. 33 ms is the floor
+# because browsers clamp delays below ~20 ms back up to 100 ms.
+TARGET_LOOP_MS = 5000
 
 
 def loadPacked(path):
@@ -72,18 +106,63 @@ def chainTips(q, level, robots, sceneRobots):
     return tips
 
 
-def chainJoints(robot, anglesDeg):
+def chainJointsRad(robot, anglesRad):
+    """Every joint position of one robot, base first, for cumulative angles in radians."""
     x = robot["pinnedPosition"]["x"]
     y = robot["pinnedPosition"]["y"]
     length = robot["jointLength"]
     theta = 0.0
     pts = [(x, y)]
-    for a in anglesDeg:
-        theta += math.radians(a)
+    for a in anglesRad:
+        theta += a
         x += length * math.cos(theta)
         y += length * math.sin(theta)
         pts.append((x, y))
     return np.array(pts)
+
+
+def chainJoints(robot, anglesDeg):
+    """Scene JSON stores integer degrees (mlmp/src/models/scene.h:340-344)."""
+    return chainJointsRad(robot, [math.radians(a) for a in anglesDeg])
+
+
+def stateJoints(q, r, robots, links, robot):
+    """Joints of robot `r` for a full state. Layout is interleaved by link,
+    q[link * numRobots + robot] (mlmp/src/state/kinematic_chain.h:210)."""
+    return chainJointsRad(robot, [q[j * robots + r] for j in range(links)])
+
+
+def interpolateState(a, b, t):
+    """KinematicChainSpace::interpolate, mlmp/src/state/kinematic_chain.h:112-139. Per
+    coordinate: linear when the gap is at most PI, otherwise the short way round, re-wrapped
+    into [-PI, PI]. Mirrored branch for branch — see the module docstring for what the naive
+    version costs."""
+    out = []
+    for f, g in zip(a, b):
+        diff = g - f
+        if abs(diff) <= math.pi:
+            out.append(f + diff * t)
+        else:
+            diff = TWO_PI - diff if diff > 0.0 else -TWO_PI - diff
+            v = f - diff * t
+            if v > math.pi:
+                v -= TWO_PI
+            elif v < -math.pi:
+                v += TWO_PI
+            out.append(v)
+    return out
+
+
+def densifyPath(states, substeps):
+    """Every segment of a path result split into `substeps` configurations, plus the goal."""
+    if len(states) < 2:
+        raise SystemExit("the run has %d path states; nothing to animate" % len(states))
+    dense = []
+    for a, b in zip(states, states[1:]):
+        for s in range(substeps):
+            dense.append(interpolateState(a, b, s / float(substeps)))
+    dense.append(list(states[-1]))
+    return dense
 
 
 def sceneBounds(scene, links):
@@ -193,18 +272,189 @@ class Panel:
         return status
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--scene", default="scene1")
-    ap.add_argument("--out", default="docs/biqrrt-vs-qrrt.gif")
-    ap.add_argument("--traces", default="docs/traces")
-    ap.add_argument("--scenes", default="docs/scenes")
-    ap.add_argument("--ms-per-frame", type=int, default=50)
-    ap.add_argument("--size", default="640x320")
-    args = ap.parse_args()
+def curveLength(points):
+    if len(points) < 2:
+        return 0.0
+    return float(np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1)))
 
-    width, height = (int(v) for v in args.size.lower().split("x"))
-    scene = json.loads((Path(args.scenes) / f"{args.scene}.json").read_text())
+
+def maxChordDeviation(tips, substeps, segments):
+    """How far the densified tip curve leaves the straight chord the raw path states would
+    have drawn — the number that says whether densifying was worth it."""
+    worst = 0.0
+    for k in range(segments):
+        a = tips[k * substeps]
+        b = tips[(k + 1) * substeps]
+        d = b - a
+        n = float(np.dot(d, d))
+        rel = tips[k * substeps : (k + 1) * substeps + 1] - a
+        t = np.clip(rel @ d / n, 0.0, 1.0) if n else np.zeros(len(rel))
+        worst = max(worst, float(np.max(np.linalg.norm(rel - np.outer(t, d), axis=1))))
+    return worst
+
+
+def writeGif(rendered, out, msPerFrame):
+    """One shared palette, taken from the last (richest) frame: Pillow only delta-encodes GIF
+    frames that agree on a palette, and most of either figure is static between frames, so
+    sharing it is worth several megabytes."""
+    palette = rendered[-1].convert("P", palette=Image.ADAPTIVE, colors=64)
+    # dither=0 is Image.Dither.NONE; the int spelling works on Pillow before and after 9.1.
+    images = [img.quantize(palette=palette, dither=0) for img in rendered]
+
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    images[0].save(
+        out,
+        save_all=True,
+        append_images=images[1:],
+        duration=msPerFrame,
+        loop=0,
+        optimize=True,
+    )
+    # Report what landed on disk, not what was handed to Pillow: `optimize` collapses runs of
+    # identical frames into one with a longer delay (which is how the motion GIF's hold at the
+    # goal pose costs nothing), and a GIF stores delays in centiseconds, so the per-frame value
+    # is whatever Pillow could round to.
+    with Image.open(out) as gif:
+        frames = getattr(gif, "n_frames", len(images))
+        size = gif.size
+        total = 0
+        for i in range(frames):
+            gif.seek(i)
+            total += gif.info.get("duration", msPerFrame)
+    print(
+        "%s: %d frames, %dx%d, %d ms/frame, %.1f s loop, %d bytes"
+        % (out, frames, size[0], size[1], msPerFrame, total / 1000.0, out.stat().st_size)
+    )
+
+
+def renderMotion(args, scene):
+    """The solution played back: real arms, a ghost trail, and each tip's own curve."""
+    runPath = (
+        Path(args.run)
+        if args.run
+        else Path(args.traces) / f"{args.scene}-{args.planner}.run.json"
+    )
+    run = json.loads(runPath.read_text())
+    if run.get("schema") != "mlmp.run/1":
+        raise SystemExit(f"{runPath}: not an mlmp.run/1 result")
+    if run.get("model") == "urdf":
+        raise SystemExit(f"{runPath}: motion mode draws planar chains; this run is model=urdf")
+    if not run.get("solved"):
+        raise SystemExit(f"{runPath}: the run did not solve, so there is no path to animate")
+    if args.substeps < 1:
+        raise SystemExit("--substeps must be at least 1")
+
+    width, height = (int(v) for v in (args.size or "640x600").lower().split("x"))
+    robots = run["robots"]
+    links = run["links"]
+    states = run["path"]
+    dense = densifyPath(states, args.substeps)
+    sceneRobots = scene["robots"]
+
+    # Precomputed once: a frame is then a lookup, and the tip curves are prefix slices.
+    joints = [
+        [stateJoints(q, r, robots, links, sceneRobots[r]) for r in range(robots)] for q in dense
+    ]
+    tips = [np.array([frame[r][-1] for frame in joints]) for r in range(robots)]
+    bounds = sceneBounds(scene, links)
+    for r in range(robots):
+        arc = curveLength(tips[r])
+        chordTips = np.array([stateJoints(q, r, robots, links, sceneRobots[r])[-1] for q in states])
+        chord = curveLength(chordTips)
+        # The length barely moves; the shape does. This line is the evidence that the
+        # interpolation above is the wrap-aware one and not a straight chord.
+        print(
+            "robot %d tip: %.3f along the interpolated curve vs %.3f along straight chords "
+            "between the %d path states (%.2fx), max deviation %.3f on a %.2f x %.2f scene"
+            % (
+                r,
+                arc,
+                chord,
+                len(states),
+                arc / chord if chord else 0.0,
+                maxChordDeviation(tips[r], args.substeps, len(states) - 1),
+                bounds[1] - bounds[0],
+                bounds[3] - bounds[2],
+            )
+        )
+
+    fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=100)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.90, bottom=0.07)
+    legend = [
+        Line2D(
+            [],
+            [],
+            color=ROBOT_COLORS[r % len(ROBOT_COLORS)],
+            label="robot %s" % sceneRobots[r].get("id", r + 1),
+        )
+        for r in range(robots)
+    ]
+    legend.append(Line2D([], [], color="black", alpha=0.25, label="start / goal"))
+    fig.legend(handles=legend, loc="lower center", ncol=len(legend), frameon=False, fontsize=6)
+    title = (
+        "%s · %s · %s · len %.2f\n"
+        "%d path states densified to %d configurations, %d-D joint space"
+    ) % (
+        run.get("scene", args.scene),
+        run.get("planner", "?"),
+        run.get("status", "?"),
+        run.get("path_length_simplified") or 0.0,
+        len(states),
+        len(dense),
+        robots * links,
+    )
+
+    # The last pose is held for a beat: a GIF restarts without warning, and the reader needs
+    # to see the arms arrive before the loop throws them back to the start.
+    order = list(range(len(dense))) + [len(dense) - 1] * HOLD_FRAMES
+    rendered = []
+    for i in order:
+        ax.clear()
+        drawStatic(ax, scene, bounds)
+        for r in range(robots):
+            color = ROBOT_COLORS[r % len(ROBOT_COLORS)]
+            trace = tips[r][: i + 1]
+            if len(trace) > 1:
+                ax.plot(trace[:, 0], trace[:, 1], color=color, linewidth=0.9, alpha=0.55)
+            for k, g in enumerate(range(max(0, i - GHOST_FRAMES), i)):
+                pts = joints[g][r]
+                ax.plot(
+                    pts[:, 0],
+                    pts[:, 1],
+                    color=color,
+                    linewidth=1.4,
+                    alpha=0.05 + 0.20 * (k + 1) / GHOST_FRAMES,
+                    solid_capstyle="round",
+                )
+            pts = joints[i][r]
+            ax.plot(
+                pts[:, 0], pts[:, 1], color=color, linewidth=2.4, solid_capstyle="round", zorder=4
+            )
+            ax.plot(pts[:, 0], pts[:, 1], "o", color=color, markersize=3.6, zorder=5)
+            ax.plot(pts[0, 0], pts[0, 1], "s", color=color, markersize=4.6, zorder=5)
+        ax.set_title(title, fontsize=7)
+        fig.canvas.draw()
+        buf = np.asarray(fig.canvas.buffer_rgba())
+        rendered.append(Image.fromarray(buf, "RGBA").convert("RGB"))
+
+    writeGif(
+        rendered,
+        args.out or "docs/solution-motion.gif",
+        args.ms_per_frame or frameDelay(len(order)),
+    )
+
+
+def frameDelay(frames):
+    """Rounded to a whole centisecond because that is all a GIF can store: asking for 59 ms
+    writes 50 and the loop silently runs 15% fast. 40 ms floor — browsers clamp delays below
+    ~20 ms back up to 100 ms."""
+    return max(40, min(90, int(round(TARGET_LOOP_MS / float(frames) / 10.0)) * 10))
+
+
+def renderTrees(args, scene):
+    """The original algorithm picture: two fixtures side by side as chain-tip clouds."""
+    width, height = (int(v) for v in (args.size or "640x320").lower().split("x"))
     packedPanels = [
         loadPacked(Path(args.traces) / f"{args.scene}-{planner}.json")
         for planner in ("biqrrt", "qrrt")
@@ -239,27 +489,53 @@ def main():
         buf = np.asarray(fig.canvas.buffer_rgba())
         rendered.append(Image.fromarray(buf, "RGBA").convert("RGB"))
 
-    # One shared palette, taken from the last (richest) frame: Pillow only delta-encodes GIF
-    # frames that agree on a palette, and the clouds are static apart from the new vertices,
-    # so sharing it is worth several megabytes.
-    palette = rendered[-1].convert("P", palette=Image.ADAPTIVE, colors=64)
-    # dither=0 is Image.Dither.NONE; the int spelling works on Pillow before and after 9.1.
-    images = [img.quantize(palette=palette, dither=0) for img in rendered]
+    writeGif(rendered, args.out or "docs/biqrrt-vs-qrrt.gif", args.ms_per_frame or 50)
 
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    images[0].save(
-        out,
-        save_all=True,
-        append_images=images[1:],
-        duration=args.ms_per_frame,
-        loop=0,
-        optimize=True,
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    print(
-        "%s: %d frames, %dx%d, %d bytes"
-        % (out, len(images), images[0].size[0], images[0].size[1], out.stat().st_size)
+    ap.add_argument(
+        "--mode",
+        choices=("motion", "trees"),
+        default="motion",
+        help="motion: animate a run's solution (default). trees: the BiQRRT/QRRT tree clouds.",
     )
+    ap.add_argument("--scene", default="scene1")
+    ap.add_argument("--planner", default="biqrrt", help="motion: which run record to animate")
+    ap.add_argument(
+        "--run",
+        default=None,
+        help="motion: mlmp.run/1 JSON; default {traces}/{scene}-{planner}.run.json",
+    )
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="default docs/solution-motion.gif (motion), docs/biqrrt-vs-qrrt.gif (trees)",
+    )
+    ap.add_argument("--traces", default="docs/traces")
+    ap.add_argument("--scenes", default="docs/scenes")
+    ap.add_argument(
+        "--substeps",
+        type=int,
+        default=24,
+        help="motion: interpolated configurations per path segment (default 24)",
+    )
+    ap.add_argument(
+        "--ms-per-frame",
+        type=int,
+        default=0,
+        help="0 = 50 for trees, or whatever fits motion into a ~%d ms loop" % TARGET_LOOP_MS,
+    )
+    ap.add_argument("--size", default=None, help="default 640x600 (motion), 640x320 (trees)")
+    args = ap.parse_args()
+
+    scene = json.loads((Path(args.scenes) / f"{args.scene}.json").read_text())
+    if args.mode == "motion":
+        renderMotion(args, scene)
+    else:
+        renderTrees(args, scene)
 
 
 if __name__ == "__main__":

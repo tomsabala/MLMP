@@ -67,6 +67,11 @@ header p { margin: 0 0 1rem; max-width: 70ch; opacity: .8; }
   cursor: crosshair;
 }
 
+/* The configuration-space canvas is not an editing surface: no crosshair, no pointer handlers. */
+.stage canvas.cspace { margin-top: .7rem; cursor: default; }
+
+figcaption.sub { opacity: .7; font-size: .8rem; }
+
 figcaption {
   margin-top: .4rem;
   font-variant-numeric: tabular-nums;
