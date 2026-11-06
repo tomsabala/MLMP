@@ -68,13 +68,42 @@ flattened to a serial chain, FCL narrowphase collision checking, and a collision
 0.02 rad because OMPL's default resolution let a 6-DOF solution contain a state its own checker
 rejects.
 
-**What this does not claim.** BiQRRT solved `scene1` and `scene5` 3/3 at a 10 s budget;
-`scene4` and `scene6` were solved 0/3 by both BiQRRT and QRRT. Those are stopwatch observations
-on one host, not a benchmark, and there is a known confound: `BiQRRTImpl::setup()` pins the
-extension step to `0.1` when no caller sets a range, while QRRT's `SelfConfig` default measured
-1.78–3.55 across `scene1`'s levels, so part of any gap may be step size rather than
-bidirectionality. Turning that into a declared parameter and running a real campaign with
-confidence intervals is Track F and Phase 2 of the roadmap.
+**What this does not claim.** With the collision-resolution fix below in place, BiQRRT solved
+`scene1` 2/3 and `scene5` 3/3 at a 10 s budget over seeds 41–43; `scene4` and `scene6` were
+solved 0/3 by both BiQRRT and QRRT. Those are stopwatch observations on one host, not a
+benchmark, and there is a known confound: `BiQRRTImpl::setup()` pins the extension step to `0.1`
+when no caller sets a range, while QRRT's `SelfConfig` default measured 1.78–3.55 across
+`scene1`'s levels, so part of any gap may be step size rather than bidirectionality. Turning
+that into a declared parameter and running a real campaign with confidence intervals is Track F
+and Phase 2 of the roadmap. Before the fix the same scenes read 3/3 and first solutions arrived
+roughly six times sooner, on paths whose interiors had barely been checked — the older numbers
+measured a different problem.
+
+**A defect the playback found, and the fix.** Animating a returned solution turned up something
+no number in `mlmp.run/1` reported: the paths contained poses that collide. Every path *state*
+was valid — the viewer re-checks them with a JS port of the C++ predicate and they all pass —
+but the arms swept through an obstacle *between* two valid states. On `scene1`/`BiQRRT`, 22 of
+73 interpolated poses were in collision, in one stretch, with the arm 0.049 scene units inside
+an obstacle: 27 px on a 600 px canvas.
+
+The cause was a units mismatch. OMPL sizes its motion-validator step as
+`longestValidSegmentFraction` (1%) of the state space's bounds extent — 17.77 rad over 8 joints
+— while `KinematicChainSpace::distance` is a workspace measure scaled by the 0.1 link length.
+One scene1 path segment measured 0.17 against a 0.178 step and got exactly **one** interior
+collision check while both arms swung across the obstacle field.
+
+`KinematicChainSpace::validSegmentCount` now derives the count from the motion instead: rotating
+joint *j* by Δθ moves every point beyond it by at most `(n - j) · linkLength · |Δθ|`, so the sum
+over joints bounds the swept displacement of any point on the arm, and the worst arm decides.
+`Solver::planarCheckStep` sets that step to a fifth of the scene's shortest obstacle edge — 0.02
+on scene1 — so `longestValidSegmentFraction` no longer has any effect on a planar scene. The
+deepest penetration left on a `scene1` solution is **0.0004 scene units, 0.2 px**, which is the
+epsilon any discrete checker has: the committed `scene1-biqrrt` recording now reports **1 of
+241** drawn poses grazing an obstacle, against 22 of 73 before. The two viewers re-check every
+pose they draw and colour the rejects red, so a regression here is visible rather than smooth.
+This is why `PLANAR_RAW_PIN` moved from 6.1990845726570605 to 20.627278998919433, why planning
+is slower per second of budget, and why fewer committed fixtures solve than they used to: the
+same motion now costs far more collision checks.
 
 ## Usage
 

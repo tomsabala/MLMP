@@ -109,7 +109,7 @@ the entire `--time-limit` (`time_solve_s` is 10.001 for `--time-limit 10`), so i
 fields — `graph_vertices`, `graph_edges`, `state_validity_checks`, `states_sampled`,
 `motion_checks` — track host speed, not the seed, and vary by a few percent between identical
 invocations. The *solution* is seed-determined: `path_length_raw` and `path_length_simplified`
-reproduce exactly across runs and across budgets (`scene1`, seed 42: raw 6.199084573 at both
+reproduce exactly across runs and across budgets (`scene1`, seed 42: raw 20.627278999 at both
 `--time-limit 3` and `10`; seeds 7 and 99 give different lengths). A harness comparing runs
 must compare the path fields, not the counters.
 

@@ -51,6 +51,7 @@ public:
         , numRobots_(numRobots)
         , numLinks_(numLinks)
         , linkLength_(linkLength)
+        , checkStep_(0.1 * linkLength)
         , environment_(env) {
         ompl::base::RealVectorBounds bounds(numRobots * numLinks);
         bounds.setLow(-PI);
@@ -139,12 +140,60 @@ public:
     }
 
     double linkLength() const { return linkLength_; }
+
+    /* How far any point on any arm may sweep between two collision checks, in workspace units.
+     * Solver derives it from the scene's smallest obstacle feature. */
+    void setCheckStep(double step) {
+        if (step > 0.0) {
+            checkStep_ = step;
+        }
+    }
+
+    /* OMPL's default count is ceil(distance / longestValidSegment), and for this space that is
+     * the wrong unit twice over: `distance` above is a workspace measure scaled by linkLength_,
+     * while longestValidSegment is a fraction of RealVectorStateSpace::getMaximumExtent(), which
+     * is 17.77 rad for an 8-joint chain. On scene1 the product left a path segment with exactly
+     * ONE interior check, and the arms swept straight through an obstacle between two states the
+     * checker had accepted — 22 of 73 interpolated poses in collision, found by animating a
+     * returned solution. The count is therefore derived from the motion itself.
+     *
+     * Rotating joint j by dtheta moves every point beyond it by at most (numLinks_ - j) *
+     * linkLength_ * |dtheta|, so the sum over joints bounds the swept displacement of any point
+     * on that arm and the worst arm decides. Angles are differenced the short way round, the way
+     * interpolate() travels. longestValidSegmentFraction no longer affects a planar scene. */
+    unsigned int validSegmentCount(const ompl::base::State* state1,
+                                   const ompl::base::State* state2) const override {
+        const auto* s1 = state1->as<StateType>();
+        const auto* s2 = state2->as<StateType>();
+
+        double worst = 0.0;
+        for (unsigned int r = 0; r < numRobots_; ++r) {
+            double sweep = 0.0;
+            for (unsigned int j = 0; j < numLinks_; ++j) {
+                const unsigned int i = j * numRobots_ + r;
+                double diff = fmod(s2->values[i] - s1->values[i], TWO_PI);
+                if (diff > PI) {
+                    diff -= TWO_PI;
+                } else if (diff < -PI) {
+                    diff += TWO_PI;
+                }
+                sweep += (numLinks_ - j) * linkLength_ * fabs(diff);
+            }
+            worst = std::max(worst, sweep);
+        }
+
+        return std::max(1u, static_cast<unsigned int>(std::ceil(worst / checkStep_)));
+    }
+
     const Environment* environment() const { return environment_; }
 
 protected:
-    double linkLength_;
     unsigned int numRobots_;
     unsigned int numLinks_;
+    double linkLength_;
+    /* Replaced per scene by Solver; the constructor's tenth of a link keeps a bare
+     * KinematicChainSpace safe to construct and check. */
+    double checkStep_;
     Environment* environment_;
 };
 

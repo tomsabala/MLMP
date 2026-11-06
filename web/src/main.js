@@ -6,7 +6,7 @@
  * the committed fixtures. At the 10 s maximum the frame cap cannot be reached; truncation is
  * surfaced anyway. */
 import { PATH_COLOR, TREE_COLORS, createTracePlayer } from './renderer.js';
-import { createCSpaceView } from './cspace.js';
+import { createCSpaceView, isValidConfig } from './cspace.js';
 import { createSceneEditor } from './editor.js';
 
 const TRACE_INTERVAL_MS = 50;
@@ -181,7 +181,12 @@ function syncAnimation() {
  * the arms in the workspace and the dot in configuration space are the same configuration. */
 function showSolution(path) {
   state.phase = 0;
-  state.player.showPath(path);
+  /* The same predicate the C++ checker runs, applied to the poses actually drawn: the planner
+   * guarantees its path states, not what the arms sweep through between them, and its motion
+   * validator can sample a segment as coarsely as one interior check. */
+  const scene = state.player.scene;
+  const top = scene.metadata.n - 1;
+  state.player.showPath(path, (q) => isValidConfig(scene, top, q));
   state.player.setPhase(0);
   if (state.cspace) {
     state.cspace.showPath(state.player.motionPath);
@@ -231,6 +236,21 @@ function renderResult(result) {
 
   state.hasPath = Boolean(result.solved && result.path && result.path.length > 0);
   showSolution(state.hasPath ? result.path : null);
+  /* Appended after showSolution, because that is what runs the checker over the drawn poses. A
+   * solved run whose animation passes through an obstacle is the most important thing this page
+   * can tell its reader, so it belongs in the result list and not in a tooltip. */
+  if (state.hasPath) {
+    const { count, total, from, to } = state.player.motionCollisions();
+    const where = from === to ? `pose ${from + 1}` : `poses ${from + 1}-${to + 1}`;
+    const dt = document.createElement('dt');
+    dt.textContent = 'collisions';
+    const dd = document.createElement('dd');
+    dd.textContent = count === 0
+      ? `none — all ${total} drawn poses are collision-free`
+      : `${count} of ${total} drawn poses (${where})`;
+    el.result.appendChild(dt);
+    el.result.appendChild(dd);
+  }
   syncLabels();
   state.editor.drawOverlay();
 }

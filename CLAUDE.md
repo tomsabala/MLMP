@@ -85,7 +85,8 @@ There is no unit-test suite. `.github/workflows/ci.yml` is the test, and it runs
 5. **Bad input**: a missing scene file must exit 2 with `error.kind == "io"`.
 6. **URDF solve**: BiQRRT must solve `ur5_scene1.json` within 2 s with `model == "urdf"`, `dof == 6`.
 7. **Planar regression pin**: `scene1.json --seed 42` must still report `path_length_raw ==
-   6.1990845726570605`. This is the Track D constraint — the planar numbers must not move.
+   20.627278998919433`. The planar numbers must not move without a deliberate planar change;
+   this value replaced 6.1990845726570605 when the collision resolution was fixed (below).
 
 To check a change locally, rebuild the image and run those same `docker run` commands. Only BiQRRT gates
 the solve check, because QRRT doesn't solve any scene reliably. Expect `scene4`/`scene6` to exit 1.
@@ -129,11 +130,28 @@ count and `getR()` returns 1, so `solve()`'s level sequence needs no model-speci
 The whole thing is behind `MLMP_ENABLE_URDF` (default ON, needs `liburdfdom-dev` + `libfcl-dev`);
 with it off a URDF scene exits 2 with `error.kind == "usage"`.
 
-**URDF collision resolution is set explicitly, planar is not.** OMPL's default
-`longestValidSegmentFraction` of 0.01 over a 6-DOF arm's ~29 rad extent sweeps ~0.14 m between
-checks, and a measured BiQRRT solution contained a state its own checker rejects.
-`Solver::setUrdfCheckResolution` pins the step to `kUrdfCheckStepRad` (0.02 rad, ~1 cm swept).
-The planar path keeps OMPL's default on purpose: changing it moves every pinned planar number.
+**Collision resolution is set explicitly on both paths, and neither uses
+`longestValidSegmentFraction`.** URDF: OMPL's default 0.01 over a 6-DOF arm's ~29 rad extent
+sweeps ~0.14 m between checks, and a measured BiQRRT solution contained a state its own checker
+rejects, so `Solver::setUrdfCheckResolution` pins the step to `kUrdfCheckStepRad` (0.02 rad,
+~1 cm swept). Planar: the same default was worse, because the two units disagree twice over —
+`KinematicChainSpace::distance` is a workspace measure scaled by `linkLength`, while
+`longestValidSegment` is a fraction of the *bounds* extent (17.77 rad for an 8-joint chain). A
+scene1 path segment measured 0.17 against a 0.178 step, so the motion validator checked it at
+exactly one interior state and the returned path swept both arms 0.049 units (27 px at a 600 px
+canvas) through an obstacle; 22 of 73 interpolated poses were in collision. It was found by
+animating a solution, not by any counter in `mlmp.run/1`.
+`KinematicChainSpace::validSegmentCount` now overrides the count: rotating joint *j* by Δθ moves
+everything beyond it by at most `(numLinks - j) * linkLength * |Δθ|`, which bounds the swept
+displacement of any point on that arm, and the worst arm decides. `Solver::planarCheckStep`
+feeds it a step of one fifth of the scene's shortest obstacle edge (the padded boundary box is
+always the longest, so it never wins the minimum), floored at 0.02 link lengths. Deepest
+remaining penetration on a scene1 solution: 0.0004 units, 0.2 px. This made planning slower per
+second of budget and moved every planar number — `PLANAR_RAW_PIN` in `ci.yml` went from
+6.1990845726570605 to 20.627278998919433, and `docs/traces/*` was re-recorded with new budgets.
+Both viewers re-check every pose they draw against a JS port of the checker (`web/src/cspace.js`)
+and colour the rejects `COLLISION_COLOR`, so a regression here shows up as a red stretch in the
+animation rather than as nothing at all.
 `BiQRRTImpl::setup()` likewise only forces `maxDistance_ = 0.1` when nobody called `setRange`,
 and `Solver` calls `BiQRRT::setRange(maxExtent * 0.05)` for URDF runs only.
 

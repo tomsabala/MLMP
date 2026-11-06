@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Re-record every committed trace fixture. Usage: mlmp/tools/recordTraces.sh [image] [cell ...]
 #
-# With no cell arguments every cell in CELLS below is recorded: 280 s of planner budget plus
-# the packing of several GB of raw stream, which measured ~15 minutes of wall clock here.
+# With no cell arguments every cell in CELLS below is recorded: 320 s of planner budget plus
+# the packing of several GB of raw stream, which measured ~20 minutes of wall clock here.
 # Naming one or more cells ("recordTraces.sh mlmp:dev scene3-qrrt") re-records just those,
 # which is what re-measuring a single budget after a planner change actually needs.
 #
@@ -11,7 +11,7 @@
 # drops the raw stream: raw recordings are 0.3-0.9 GB apiece at a 10 s budget because every
 # frame re-dumps the whole planner graph, so only the packed form is committed.
 #
-# Exit 1 cells (every QRRT cell, and BiQRRT on scenes 4 and 6) are expected outcomes, not
+# Exit 1 cells (every QRRT cell, and BiQRRT on scenes 3, 4 and 6) are expected outcomes, not
 # script failures, so the loop deliberately runs without `set -e`.
 #
 # A traced run is NOT byte-reproducible, even at a fixed seed: frame capture spends part of the
@@ -29,51 +29,65 @@
 
 # Per-cell budget: "scene algo budget_s interval_ms".
 #
-# The budget is the smallest of {10, 20, 30, 60} s at which that planner solves this scene with
-# tracing on, seed 42, on mlmp:dev. The explorer's default view is solution playback, so a cell
-# that cannot produce a path is worth far less than one that can — 11 of the 12 fixtures this
-# table replaced had path_states 0.
+# The budget is the smallest of {10, 20, 30, 60, 120} s at which that planner solves this scene
+# with tracing on, seed 42, on mlmp:dev. The explorer's default view is solution playback, so a
+# cell that cannot produce a path is worth far less than one that can.
+#
+# Every budget below was re-measured after the collision-resolution fix (KinematicChainSpace::
+# validSegmentCount now sizes the motion validator from the swept distance of the arm, and
+# Solver::planarCheckStep pins that step to a fifth of the scene's shortest obstacle edge).
+# A motion now costs one to two orders of magnitude more state-validity checks than it did, so
+# the planner covers far less ground per second and three cells that used to solve no longer do:
+# scene3/BiQRRT (was 20 s traced) now fails untraced at 10, 30, 60 and 120 s, and QRRT, which
+# used to solve scene1 untraced at 20 s and scene5 untraced at 30 s, now solves scene1 at no
+# untraced budget up to 60 s and scene5 only at 60 s untraced (first solution 28.2 s).
 #
 # Untraced probes only narrow the search; every budget below was confirmed with tracing on,
 # because every frame re-dumps the whole planner graph, so capture gets more expensive as the
-# graph grows and the planner keeps a shrinking share of the wall clock. Measured on this
-# image: QRRT solves scene1 untraced at 20 s and scene5 untraced at 30 s, but with tracing on
-# it solves neither, even at 60 s — where scene1/QRRT reached only 29 373 graph vertices in
-# 60 s against the 11 339 a traced 10 s run reaches.
+# graph grows and the planner keeps a shrinking share of the wall clock. Measured after the fix:
+# BiQRRT solves scene2 and scene5 untraced at 10 s, but traced it needs 60 s for either.
 #
 # The interval keeps the whole run inside --trace-max-frames 400: budget_s * 1000 / interval
 # must stay <= 400, or the frames stop a third of the way in and the replay freezes early.
 # Capture overhead stretches the real cadence, so the counts land under the cap (a 60 s/150 ms
-# cell records ~313-325 frames) while the last frame still sits within 0.5 % of the budget.
+# cell records ~340-380 frames) while the last frame still sits within 0.5 % of the budget.
 #
 # A cell that solves at no budget in the set is recorded at its partner's budget, so a scene's
 # two panels are the same planner time and the side-by-side is a fair comparison rather than
-# one planner being given longer. Scenes 4 and 6 solve for neither planner, so they keep 10 s.
+# one planner being given longer. Scenes 3, 4 and 6 solve for neither planner, so they keep 10 s.
 CELLS=(
-  # scene1: BiQRRT's first solution lands at 0.47 s traced. 10 s is the budget the rest of the
-  # repo pins, and this is the one cell that already solved before this table existed.
+  # scene1: the only cell that solves at the 10 s budget the rest of the repo pins — BiQRRT's
+  # first solution lands at 3.56 s traced (1.80 s untraced). This is the explorer's default.
   "1 BiQRRT 10 50"
-  # scene1: QRRT solves at no budget traced - 20 s and 60 s both failed with tracing on,
-  # though an untraced 20 s run does solve. Recorded at BiQRRT's 10 s to match the pair.
+  # scene1: QRRT solves at no budget — untraced probes failed at 10 s and 60 s after the fix
+  # (before it, untraced 20 s solved). Recorded at BiQRRT's 10 s to match the pair.
   "1 QRRT 10 50"
-  # scene2: BiQRRT needs 60 s with tracing on; 10 s, 20 s and 30 s traced all failed.
+  # scene2: BiQRRT needs 60 s with tracing on; 10 s, 20 s and 30 s traced all failed, 10 s and
+  # 20 s twice. Untraced it still solves at 10 s, so the whole gap here is capture overhead.
   "2 BiQRRT 60 150"
-  # scene2: QRRT solved at none of 10/20/30/60 s untraced, so traced is hopeless too.
+  # scene2: QRRT solved at neither 10 s nor 60 s untraced, so traced is hopeless too.
   "2 QRRT 60 150"
-  # scene3: BiQRRT needs 20 s with tracing on; 10 s traced failed although 10 s untraced solves.
-  "3 BiQRRT 20 50"
-  # scene3: QRRT solves untraced only at 60 s, and traced not even there (2.5 MB for an empty
-  # path), so it is recorded at BiQRRT's 20 s.
-  "3 QRRT 20 50"
-  # scene4: solved by neither planner - untraced probes failed at 10, 20, 30 and 60 s for both.
-  # Kept at 10 s: a longer budget buys a denser cloud and no path.
+  # scene3: BiQRRT no longer solves this scene at all — untraced probes failed at 10, 30, 60
+  # and 120 s. Before the fix it solved traced at 20 s and was the explorer's default; the
+  # finer collision resolution is the cause. Kept at 10 s, like the other unsolved scenes.
+  "3 BiQRRT 10 50"
+  # scene3: QRRT failed untraced at 10 s and has never solved this scene traced.
+  "3 QRRT 10 50"
+  # scene4: solved by neither planner — BiQRRT failed untraced at 10, 30, 60 and 120 s, QRRT
+  # at 10 s. Kept at 10 s: a longer budget buys a denser cloud and no path.
   "4 BiQRRT 10 50"
   "4 QRRT 10 50"
-  # scene5: BiQRRT needs 30 s with tracing on; 10 s and 20 s traced failed.
-  "5 BiQRRT 30 100"
-  # scene5: QRRT solves untraced at 30 s but traced at neither 30 s nor 60 s.
-  "5 QRRT 30 100"
-  # scene6: solved by neither planner - untraced probes failed at 10, 20, 30 and 60 s for both.
+  # scene5: 60 s is the only traced budget at which BiQRRT has solved this scene after the fix,
+  # and only 1 run in 4 did (10 s, 20 s and 30 s traced all failed; untraced it still solves at
+  # 10 s, first solution 5.08 s). The committed fixture is from a 60 s run that did not solve;
+  # re-recording may well produce a solved one. Kept at 60 s rather than dropped to 10 s because
+  # 10 s cannot solve it at all, and the 60 s graph is much the richer picture either way.
+  "5 BiQRRT 60 150"
+  # scene5: QRRT solves untraced at 60 s (first solution 28.2 s) but not traced at 60 s, which
+  # is the only budget it could be recorded at without outspending its partner.
+  "5 QRRT 60 150"
+  # scene6: solved by neither planner — BiQRRT failed untraced at 10, 30, 60 and 120 s, QRRT
+  # at 10 s.
   "6 BiQRRT 10 50"
   "6 QRRT 10 50"
 )

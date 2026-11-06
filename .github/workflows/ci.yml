@@ -16,10 +16,16 @@ env:
   # (~0.71 s) and seed 7 solves 0/3 even at 2 s. Keep the gate on seed 42.
   URDF_SCENE: ur5_scene1.json
   URDF_SOLVE_BUDGET: "2"
-  # Planar regression pin: the planar path must not move when the URDF path is touched.
+  # Planar regression pin: the planar path must not move unless a planar change says it should.
   # Measured locally on mlmp:dev and reproduced after every change in this track.
   # Per-runner if GitHub's value differs; see the note on the step below.
-  PLANAR_RAW_PIN: "6.1990845726570605"
+  #
+  # Moved from 6.1990845726570605 when KinematicChainSpace::validSegmentCount replaced OMPL's
+  # resolution for planar scenes: the old number came from paths whose interiors were barely
+  # checked (one interior collision check on a scene1 segment, 22 of 73 drawn poses in
+  # collision, 27 px of obstacle penetration at a 600 px canvas). The new one is a path whose
+  # deepest penetration is 0.0004 scene units, 0.2 px.
+  PLANAR_RAW_PIN: "20.627278998919433"
 
 jobs:
   build-and-smoke:

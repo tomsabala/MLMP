@@ -18,7 +18,7 @@
  * the slider scrubs the interpolated solution, in the search views it scrubs recorded trace
  * frames. The counter says which one is under the thumb. */
 import { PATH_COLOR, TREE_COLORS, createTracePlayer } from './renderer.js';
-import { createCSpaceView } from './cspace.js';
+import { createCSpaceView, isValidConfig } from './cspace.js';
 
 const el = {
   scene: document.getElementById('scene'),
@@ -133,6 +133,22 @@ function emptyMotionNote(panel) {
     + 'play. Switch the view to search tree to see how far it got.';
 }
 
+/* Every state of a returned path is collision-free, but what happens between two of them is
+ * only as true as the motion validator's sampling. Before KinematicChainSpace::validSegmentCount
+ * was fixed, one scene1 segment got a single interior check and 22 of 73 drawn poses swept
+ * through an obstacle; now a reject is a single pose touching an edge, which is the epsilon
+ * every discrete checker has. The two cases read differently, so they are worded differently. */
+function collisionNote(panel) {
+  const { count, total, from, to } = panel.player.motionCollisions();
+  if (count === 0) return '';
+  if (to - from < 2) {
+    const where = from === to ? `pose ${from + 1}` : `poses ${from + 1}-${to + 1}`;
+    return ` · grazes an obstacle at ${where} of ${total} — a discrete checker's epsilon`;
+  }
+  return ` · ${count}/${total} drawn poses collide (poses ${from + 1}-${to + 1}) — the planner `
+    + 'checked this segment too coarsely to notice';
+}
+
 /* A level the run never reached draws an empty canvas, and an empty canvas reads as a broken
  * page. QRRT on scene1 spends its whole budget without putting a single vertex on the top level,
  * which is the comparison the explorer exists to make — so say it. */
@@ -183,7 +199,8 @@ function render() {
       if (panel.cspace) panel.cspace.setPhase(t);
       panel.player.redraw();
       panel.caption.textContent = states > 1
-        ? `${captionOf(panel.data, state.frame)} · pose ${Math.min(state.frame + 1, states)}/${states}`
+        ? `${captionOf(panel.data, state.frame)} · pose ${Math.min(state.frame + 1, states)}`
+          + `/${states}${collisionNote(panel)}`
         : emptyMotionNote(panel.data);
     } else if (frames.length > 0) {
       panel.caption.textContent = captionOf(panel.data, frameIndex) + emptyLevelNote(panel);
@@ -317,7 +334,10 @@ async function loadScene(name) {
     else panel.cspace = createCSpaceView({ canvas: panel.cspaceCanvas, scene });
     panel.player.setViewMode(el.view.value);
     const path = Array.isArray(runs[i].path) ? runs[i].path : null;
-    panel.player.showPath(path);
+    /* The same predicate the C++ checker runs, applied to the poses actually drawn. The planner
+     * only guarantees the path *states*; what happens between them depends on how finely its
+     * motion validator sampled the segment, and on these scenes that is as coarse as one check. */
+    panel.player.showPath(path, (q) => isValidConfig(scene, links - 1, q));
     panel.cspace.showPath(panel.player.motionPath);
   });
   state.intervalMs = fixtures[0].interval_ms || 50;

@@ -42,6 +42,16 @@ export const TREE_COLORS = {
  * out of TREE_COLORS because that map must stay equal to traceGif.py's palette, which colours
  * component tags only. */
 export const PATH_COLOR = '#2ca02c';
+
+/* Poses on the drawn solution that the collision checker rejects. Drawing them green would hide
+ * a planner defect behind a smooth animation, so a page hands showPath a validity predicate and
+ * the poses it rejects are drawn in this colour. That is how the planar collision-resolution bug
+ * was found: 22 of 73 interpolated poses on scene1/BiQRRT, 0.049 units inside an obstacle, on a
+ * path segment the motion validator had sampled exactly once. Since
+ * KinematicChainSpace::validSegmentCount was fixed the deepest penetration is 0.0004 units,
+ * 0.2 px at a 600 px canvas — so red should now appear only as isolated grazes, and a contiguous
+ * red stretch means the resolution regressed. */
+export const COLLISION_COLOR = '#e8000d';
 export const PADDING = 0.05;
 
 /* The JS mirror of treeLabel (mlmp/src/models/run_result.h:91-98) — the component tag a
@@ -224,6 +234,9 @@ export function createTracePlayer({ canvas, scene } = {}) {
    * frame redraws them 60 times a second. */
   let dense = [];
   let tipTraces = [];
+  /* Parallel to `dense`: true where the page's validity predicate rejected that pose. Empty when
+   * no predicate was supplied. */
+  let colliding = [];
   /* Which configuration of `dense` the solid arms stand at, 0..1. The page owns the clock. */
   let phase = 1;
   let viewMode = 'motion';
@@ -253,6 +266,7 @@ export function createTracePlayer({ canvas, scene } = {}) {
     path = null;
     dense = [];
     tipTraces = [];
+    colliding = [];
     phase = 1;
     counts = null;
     treeSource = 'planner';
@@ -481,11 +495,10 @@ export function createTracePlayer({ canvas, scene } = {}) {
       strokePolyline(ctx, project, trace.slice(0, end));
     }
   }
-
-  function drawArms(ctx, project, q, { alpha, width, joints }) {
+  function drawArms(ctx, project, q, { alpha, width, joints, color = PATH_COLOR }) {
     ctx.lineWidth = width;
-    ctx.strokeStyle = hexToRgba(PATH_COLOR, alpha);
-    ctx.fillStyle = hexToRgba(PATH_COLOR, alpha);
+    ctx.strokeStyle = hexToRgba(color, alpha);
+    ctx.fillStyle = hexToRgba(color, alpha);
     for (let r = 0; r < robots; r++) {
       const pts = pathArm(q, r);
       strokePolyline(ctx, project, pts);
@@ -512,9 +525,19 @@ export function createTracePlayer({ canvas, scene } = {}) {
     for (let back = 4; back >= 1; back--) {
       const i = at - back * wake;
       if (i < 0) continue;
-      drawArms(ctx, project, dense[i], { alpha: 0.1 + 0.05 * (4 - back), width: 1.5, joints: false });
+      drawArms(ctx, project, dense[i], {
+        alpha: 0.1 + 0.05 * (4 - back),
+        width: 1.5,
+        joints: false,
+        color: colliding[i] ? COLLISION_COLOR : PATH_COLOR,
+      });
     }
-    drawArms(ctx, project, dense[at], { alpha: 1, width: 3, joints: true });
+    drawArms(ctx, project, dense[at], {
+      alpha: 1,
+      width: 3,
+      joints: true,
+      color: colliding[at] ? COLLISION_COLOR : PATH_COLOR,
+    });
   }
 
   /* Layer order is the design: obstacles, graph, arms, solution. Anything the reader needs to
@@ -570,9 +593,11 @@ export function createTracePlayer({ canvas, scene } = {}) {
       viewMode = mode;
     },
 
-    /* Densifying and running forward kinematics over the whole solution happens here, once, and
-     * never in redraw: motion playback redraws at animation rate. */
-    showPath(next) {
+    /* Densifying, running forward kinematics over the whole solution and checking each pose
+     * happens here, once, and never in redraw: motion playback redraws at animation rate.
+     * `isValid` is optional and comes from the page (cspace.js's isValidConfig bound to this
+     * scene's top level); without it nothing is flagged and every pose is drawn as valid. */
+    showPath(next, isValid) {
       path = next && next.length > 0 ? next : null;
       dense = path ? densifyPath(path) : [];
       tipTraces = [];
@@ -582,6 +607,7 @@ export function createTracePlayer({ canvas, scene } = {}) {
           return pts[pts.length - 1];
         }));
       }
+      colliding = typeof isValid === 'function' ? dense.map((q) => !isValid(q)) : [];
       phase = 1;
     },
 
@@ -589,6 +615,22 @@ export function createTracePlayer({ canvas, scene } = {}) {
      * the wrap, and a scrubber that overshoots should sit at the goal, not jump to the start. */
     setPhase(t) {
       phase = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 1;
+    },
+
+    /* How many of the drawn poses the checker rejects and the first contiguous stretch of them,
+     * so a page can say "22 of 73 poses collide (26-47)" rather than leave a red arm
+     * unexplained. */
+    motionCollisions() {
+      let count = 0;
+      let from = -1;
+      let to = -1;
+      for (let i = 0; i < colliding.length; i++) {
+        if (!colliding[i]) continue;
+        count++;
+        if (from < 0) from = i;
+        if (to < 0 || to === i - 1) to = i;
+      }
+      return { count, total: dense.length, from, to };
     },
 
     /* Number of interpolated configurations; 0 when this run has no solution. The page sizes its
@@ -612,6 +654,7 @@ export function createTracePlayer({ canvas, scene } = {}) {
       path = null;
       dense = [];
       tipTraces = [];
+      colliding = [];
       phase = 1;
       counts = null;
       treeSource = 'planner';
@@ -656,6 +699,7 @@ export function createTracePlayer({ canvas, scene } = {}) {
       path = null;
       dense = [];
       tipTraces = [];
+      colliding = [];
       derived = [];
       cacheSource = null;
       counts = null;

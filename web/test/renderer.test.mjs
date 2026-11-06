@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import {
+  COLLISION_COLOR,
   PADDING,
   PATH_COLOR,
   TREE_CODES,
@@ -17,8 +18,8 @@ import {
   chainTips,
   createTracePlayer,
   densifyPath,
-  interpolateConfig,
   hexToRgba,
+  interpolateConfig,
   levelAlpha,
   sceneBounds,
 } from '../src/renderer.js';
@@ -296,4 +297,53 @@ const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
   assert.deepEqual(densifyPath([from], 4), [from]);
 }
 
-console.log('renderer.test.mjs: 10 groups ok');
+/* 11. Colliding poses. The planner guarantees its path states, not the poses between them: on
+ *     scene1 its motion validator checks one interior state on a segment whose arms sweep
+ *     through an obstacle. The player must take the page's predicate, flag exactly the poses it
+ *     rejects, draw them in COLLISION_COLOR, and report them — a viewer that smoothed over this
+ *     would be hiding the defect that made it worth building. */
+{
+  const { canvas, ops } = stubCanvas();
+  const player = createTracePlayer({ canvas, scene });
+  const a = q8(0);
+  const b = q8(0.05);
+
+  /* Reject the middle third of the interpolation, whatever its length. */
+  const dense = densifyPath([a, b]);
+  const bad = new Set();
+  for (let i = Math.floor(dense.length / 3); i < Math.floor((2 * dense.length) / 3); i++) {
+    bad.add(dense[i].join(','));
+  }
+  player.setViewMode('motion');
+  player.showPath([a, b], (q) => !bad.has(q.join(',')));
+
+  const report = player.motionCollisions();
+  assert.equal(report.total, dense.length);
+  assert.equal(report.count, bad.size, 'the player flagged a different number of poses');
+  assert.equal(report.from, Math.floor(dense.length / 3));
+  assert.equal(report.to, Math.floor((2 * dense.length) / 3) - 1);
+
+  const strokesAt = (t) => {
+    ops.length = 0;
+    player.setPhase(t);
+    player.redraw();
+    return {
+      red: countOps(ops, 'stroke', COLLISION_COLOR),
+      green: countOps(ops, 'stroke', PATH_COLOR),
+    };
+  };
+  assert.ok(strokesAt(0.5).red > 0, 'a rejected pose was not drawn in the collision colour');
+  assert.equal(strokesAt(0).red, 0, 'an accepted pose was drawn as colliding');
+  assert.ok(strokesAt(0).green > 0);
+
+  /* No predicate means no claim: nothing is flagged rather than everything being called valid. */
+  player.showPath([a, b]);
+  assert.deepEqual(player.motionCollisions(), {
+    count: 0,
+    total: dense.length,
+    from: -1,
+    to: -1,
+  });
+}
+
+console.log('renderer.test.mjs: 11 groups ok');

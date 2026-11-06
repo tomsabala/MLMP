@@ -23,17 +23,20 @@
      its configuration space inside an obstacle, while scene3's level 0 is two short stubs that
      can barely reach one.</p>
   <p>Both panels of a scene get the same seed and the same budget, and the budget differs by
-     scene (10–60 s) because recording costs planner time: every trace frame re-dumps the whole
-     graph, so a traced run explores less than an untraced one at the same wall clock. BiQRRT
-     solves scenes 1, 2, 3 and 5 here; QRRT solves none of them, and neither solves 4 or 6.</p>
+     scene (10 s or 60 s) because recording costs planner time: every trace frame re-dumps the
+     whole graph, so a traced run explores less than an untraced one at the same wall clock. In
+     these recordings BiQRRT solves scene1 and scene2; QRRT solves nothing, and scenes 3 to 6 go
+     unsolved for both. Collision checking became roughly two orders of magnitude finer when a
+     resolution defect was fixed, which is why fewer cells solve here than this project's older
+     numbers claim — those paths were cheaper because their interiors were barely checked.</p>
 </header>
 
 <section class="controls">
   <label>Scene
     <select id="scene">
-      <option value="scene1">scene1</option>
+      <option value="scene1" selected>scene1</option>
       <option value="scene2">scene2</option>
-      <option value="scene3" selected>scene3</option>
+      <option value="scene3">scene3</option>
       <option value="scene4">scene4</option>
       <option value="scene5">scene5</option>
       <option value="scene6">scene6</option>

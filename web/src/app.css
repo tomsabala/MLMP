@@ -1,95 +1,397 @@
-:root { color-scheme: light dark; }
+/* The live planner's entire design: no framework, no web font, no build step. Everything that
+ * varies (type sizes, spacing steps, radii, colours) is a custom property at :root, so a change
+ * lands in one place instead of in the rules below it.
+ *
+ * The same token block opens site/overview.css and docs/style.css. It is duplicated rather than
+ * @imported because the three pages ship from three directories of one container image
+ * (/a/mlmp/, /a/mlmp/explorer/, /a/mlmp/live/): a shared sheet would cost every page a second
+ * render-blocking request to save forty lines. Type scale, spacing grid, radii and palette are
+ * byte-identical in all three; the width and control tokens are per page, because the overview
+ * has no canvas and no control bar. Change a shared token in one sheet, change it in all three.
+ *
+ * The canvases are the one surface the palette does not flip. renderer.js strokes obstacles and
+ * arms in rgba(0, 0, 0, .7) (renderer.js:330-357) and cspace.js leaves free space transparent so
+ * the element's own background shows through (cspace.js:43), so the drawing surface has to stay
+ * light in both schemes or the arms vanish. In dark mode it is dimmed to #e9eaee rather than
+ * white, which keeps the obstacle grey (rgba(128,128,128,.5)) readable while stopping a 640 px
+ * square from being the brightest thing on the screen. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Type scale: 12 → 28 px, about 1.2 per step, 16 px body. */
+  --fs-1: .75rem;
+  --fs-2: .8125rem;
+  --fs-3: .875rem;
+  --fs-4: 1rem;
+  --fs-5: 1.125rem;
+  --fs-6: 1.375rem;
+  --fs-7: 1.75rem;
+
+  /* Spacing: one 4 px grid, used for every margin, padding and gap on the page. */
+  --s-1: .25rem;
+  --s-2: .5rem;
+  --s-3: .75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+
+  --r-1: 5px;
+  --r-2: 8px;
+  --r-3: 12px;
+
+  /* One height for every control in the bar, so selects, buttons and inputs align. */
+  --ctl-h: 2.125rem;
+  --measure: 70ch;
+  --page: 1180px;
+
+  --bg: light-dark(#fcfcfd, #0e1014);
+  --surface: light-dark(#ffffff, #15181e);
+  --surface-2: light-dark(#f3f4f6, #1c2027);
+  --line: light-dark(#e3e5ea, #272c35);
+  --line-strong: light-dark(#c8ccd4, #3b414c);
+  --fg: light-dark(#15171c, #e6e8ee);
+  --fg-muted: light-dark(#5a6069, #9aa1ac);
+  --fg-faint: light-dark(#858b95, #767d89);
+  --accent: light-dark(#1a5fd0, #6aa8ff);
+  --accent-hover: light-dark(#164ead, #8dbdff);
+  --accent-fg: light-dark(#ffffff, #0e1014);
+  --canvas: light-dark(#ffffff, #e9eaee);
+
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
 
 body {
   margin: 0 auto;
-  padding: 1.25rem;
-  max-width: 1120px;
-  font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+  padding: var(--s-6) var(--s-4) var(--s-7);
+  max-width: var(--page);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: var(--fs-4);
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
 }
 
-h1 { font-size: 1.3rem; margin: 0 0 .35rem; }
-h2 { font-size: 1rem; margin: 0 0 .5rem; }
-header p { margin: 0 0 1rem; max-width: 70ch; opacity: .8; }
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover { color: var(--accent-hover); text-decoration-thickness: 2px; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: .9em;
+  overflow-wrap: anywhere;
+  padding: .1em .3em;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+h1 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--fs-7);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+
+h2 { margin: 0 0 var(--s-3); font-size: var(--fs-3); font-weight: 600; }
+
+header p { margin: 0 0 var(--s-3); max-width: var(--measure); }
+
+/* The lede is the one paragraph a visitor reads before pressing Solve; the second explains the
+ * configuration-space canvas and is reference text, so it is set a step down and muted. There is
+ * no class to hang this on — index.html is not this file's to edit. */
+header p:first-of-type { font-size: var(--fs-5); color: var(--fg); }
+header p:not(:first-of-type) { font-size: var(--fs-3); color: var(--fg-muted); }
 
 .controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: .6rem;
-  padding: .6rem .75rem;
-  border: 1px solid rgba(128, 128, 128, .4);
-  border-radius: 6px;
+  gap: var(--s-2) var(--s-3);
+  margin-top: var(--s-5);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface);
 }
 
-.controls button, .controls select, .controls input[type=number] {
-  font: inherit;
-  padding: .15rem .6rem;
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  font-size: var(--fs-1);
+  font-weight: 600;
+  color: var(--fg-muted);
 }
-.controls input[type=number] { width: 6rem; }
-.controls label { display: inline-flex; gap: .35rem; align-items: center; }
-.counter { font-variant-numeric: tabular-nums; opacity: .8; }
 
-.levels, .legend { display: flex; gap: .55rem; align-items: center; }
-.levels label { display: inline-flex; gap: .2rem; align-items: center; }
+.controls select,
+.controls button,
+.controls input[type=number] {
+  height: var(--ctl-h);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: var(--fs-3);
+  font-weight: 400;
+}
 
-.legend span { display: inline-flex; gap: .3rem; align-items: center; }
+.controls input[type=number] {
+  width: 5.5rem;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* appearance:none to get one control height across selects, buttons and inputs; the chevron is a
+ * data URI in this file, not a request, and is drawn in a mid grey that reads on both palettes.
+ * The backslash continuations are CSS string line-joins — the file keeps its 100-column limit. */
+.controls select {
+  appearance: none;
+  padding-right: calc(var(--s-3) + .9rem);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' \
+viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b919b' \
+stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--s-2) center;
+  background-size: .7rem;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.controls button { cursor: pointer; font-weight: 500; }
+.controls button:hover:not(:disabled) { background: var(--surface-2); }
+.controls select:hover:not(:disabled) { border-color: var(--fg-faint); }
+.controls button:active:not(:disabled) { background: var(--line); }
+
+/* Solve is the page's one primary action, so it is the page's one filled control. */
+#solve {
+  min-width: 5.5rem;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+#solve:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Solve is disabled until the wasm module is live, the level select is disabled in
+ * solution-motion view, and PRMStar is a disabled option: all three have to look unavailable,
+ * not merely be unavailable. */
+.controls :disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  background-color: var(--surface-2);
+}
+
+#solve:disabled { background: var(--surface-2); color: var(--fg-muted); border-color: var(--line); }
+/* `:has(> :disabled)`, not `:has(:disabled)`: the planner select owns one disabled option
+ * (PRMStar needs threads), and the loose form greyed out the whole Planner field because of it. */
+.controls label:has(> :disabled) { opacity: .5; }
+
+.controls input[type=checkbox] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.controls label:has(> input[type=checkbox]) { color: var(--fg); cursor: pointer; }
+
+.controls input[type=range] {
+  flex: 0 1 9rem;
+  min-width: 6rem;
+  height: var(--ctl-h);
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.controls input[type=range]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.controls input[type=range]::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5.5px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.controls input[type=range]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.controls input[type=range]::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.counter {
+  flex: none;
+  white-space: nowrap;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-2);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--ctl-h);
+}
+
+.levels, .legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+  align-items: center;
+  font-size: var(--fs-2);
+  color: var(--fg-muted);
+}
+
+.levels label { display: inline-flex; gap: var(--s-1); align-items: center; }
+.legend span { display: inline-flex; gap: var(--s-2); align-items: center; }
 /* A colour this run has none of: still listed, visibly absent. */
 .legend .dim { opacity: .35; }
-.source { font-size: .82rem; opacity: .75; }
+.source { font-size: var(--fs-2); color: var(--fg-muted); }
+
 .swatch {
-  width: .7rem;
-  height: .7rem;
+  width: .6rem;
+  height: .6rem;
   border-radius: 50%;
   display: inline-block;
+  flex: none;
 }
 
 .stage {
   display: grid;
-  grid-template-columns: minmax(320px, 2fr) minmax(220px, 1fr);
-  gap: 1rem;
-  margin-top: 1rem;
+  grid-template-columns: minmax(320px, 2fr) minmax(240px, 1fr);
+  gap: var(--s-5);
+  margin-top: var(--s-5);
   align-items: start;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 60rem) {
   .stage { grid-template-columns: 1fr; }
 }
 
-.stage figure { margin: 0; }
+.stage figure { margin: 0; min-width: 0; }
+
 .stage canvas {
+  display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
-  border: 1px solid rgba(128, 128, 128, .4);
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--canvas);
   touch-action: none;
   cursor: crosshair;
 }
 
-/* The configuration-space canvas is not an editing surface: no crosshair, no pointer handlers. */
-.stage canvas.cspace { margin-top: .7rem; cursor: default; }
+/* The workspace canvas is keyboard-reachable (tabindex=0) because Enter closes a new obstacle
+ * and Delete removes the selected one, so it needs a focus ring like any other control. */
+.stage canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-figcaption.sub { opacity: .7; font-size: .8rem; }
+/* The configuration-space canvas is not an editing surface: no crosshair, no pointer handlers. */
+.stage canvas.cspace { margin-top: var(--s-4); cursor: default; }
 
 figcaption {
-  margin-top: .4rem;
+  margin-top: var(--s-2);
+  font-size: var(--fs-3);
   font-variant-numeric: tabular-nums;
-  font-size: .88rem;
-  opacity: .85;
+  color: var(--fg-muted);
+}
+
+figcaption.sub { margin-top: var(--s-1); font-size: var(--fs-2); color: var(--fg-faint); }
+
+.stage aside {
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface);
+}
+
+.stage aside h2 {
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-muted);
 }
 
 #result {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: .15rem .6rem;
+  gap: var(--s-1) var(--s-3);
   margin: 0;
-  font-size: .88rem;
+  font-size: var(--fs-2);
   font-variant-numeric: tabular-nums;
 }
-#result dt { opacity: .7; }
-#result dd { margin: 0; overflow-wrap: anywhere; }
 
-.note { font-size: .8rem; opacity: .72; max-width: 40ch; }
+#result dt { color: var(--fg-muted); }
 
-footer { margin-top: 1.5rem; font-size: .85rem; opacity: .75; }
+#result dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: var(--s-4) 0 0;
+  font-size: var(--fs-2);
+  line-height: 1.5;
+  color: var(--fg-faint);
+  max-width: 44ch;
+}
+
+footer {
+  margin-top: var(--s-7);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-3);
+  color: var(--fg-muted);
+}
+
+footer p { margin: 0; max-width: var(--measure); }
+
+@media (max-width: 30rem) {
+  body { padding: var(--s-5) var(--s-3) var(--s-6); }
+  h1 { font-size: var(--fs-6); }
+  header p:first-of-type { font-size: var(--fs-4); }
+
+  /* At 390 px every labelled field gets its own row: side by side they are 120 px wide and
+   * truncate their own option text. */
+  .controls > label { flex: 1 1 100%; justify-content: space-between; }
+  .controls select, .controls input[type=number] { flex: 1 1 auto; min-width: 0; max-width: 62%; }
+  .controls label:has(> input[type=checkbox]) { justify-content: flex-start; }
+  .controls button { flex: 1 1 0; }
+  .controls input[type=range] { flex: 1 1 auto; }
+  .counter { flex: none; }
+}

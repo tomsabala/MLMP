@@ -1,9 +1,11 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -324,8 +326,36 @@ private:
     std::shared_ptr<KinematicChainSpace> makeChainSpace(unsigned int numLinks) {
         auto space = std::make_shared<KinematicChainSpace>(
             scene_.getR(), numLinks, scene_.getJointLength(), &env_);
+        space->setCheckStep(planarCheckStep());
         attachSamplerCounter(*space, counters_);
         return space;
+    }
+
+    /* How far any point on an arm may sweep between two collision checks. A fifth of the
+     * shortest obstacle edge in the scene: short enough that nothing can be stepped over, and
+     * scene-relative because the committed scenes span link lengths from 0.05 to 1.0 and
+     * obstacle edges from 0.1 to 1.0. The 0.02-link floor stops a degenerate edge from making
+     * every motion check unaffordable. Scene::addBoundarySegments appends the padded box last
+     * and those four edges are the longest in any scene, so they never win the minimum.
+     *
+     * Without this the planar setup used OMPL's default resolution and returned paths whose
+     * interior was never checked; see KinematicChainSpace::validSegmentCount. */
+    double planarCheckStep() const {
+        double shortest = std::numeric_limits<double>::infinity();
+        for (const auto& segment : env_) {
+            shortest = std::min(shortest, std::hypot(segment.x1 - segment.x0,
+                                                     segment.y1 - segment.y0));
+        }
+        /* A fifth of the shortest obstacle edge. The factor was swept at 0.2 / 0.5 / 1.0 on
+         * scene1, scene3 and scene5 with a 10 s budget: 0.2 solved scene1 in 1.17 s and scene5
+         * in 1.91 s, 0.5 was no better overall (0.85 s / 6.15 s) and 1.0 lost scene1 outright,
+         * so the conservative end costs nothing here. Deepest penetration left on a scene1
+         * solution at 0.2 is 0.0004 scene units — 0.2 px at a 600 px canvas. */
+        const double floorStep = 0.02 * scene_.getJointLength();
+        if (!std::isfinite(shortest)) {
+            return 0.1 * scene_.getJointLength();
+        }
+        return std::max(0.2 * shortest, floorStep);
     }
 
 #ifdef MLMP_ENABLE_URDF
