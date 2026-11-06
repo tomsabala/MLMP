@@ -10,13 +10,16 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import {
+  COLLISION_COLOR,
   PADDING,
   PATH_COLOR,
   TREE_CODES,
   TREE_COLORS,
   chainTips,
   createTracePlayer,
+  densifyPath,
   hexToRgba,
+  interpolateConfig,
   levelAlpha,
   sceneBounds,
 } from '../src/renderer.js';
@@ -41,6 +44,7 @@ function stubCanvas() {
     closePath() {},
     moveTo() {},
     lineTo() {},
+    setLineDash() {},
     fill() {},
     stroke() {
       ops.push({ op: 'stroke', style: ctx.strokeStyle });
@@ -155,9 +159,10 @@ const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
   assert.equal(levelAlpha(3, 4), 1);
 }
 
-/* 7. View modes. The grey edge web is what collapses a dense graph into a blob, so `vertices`
- *    must drop the edges while keeping the dots and `path` must drop the graph entirely — and
- *    the solution has to survive both. */
+/* 7. View modes. The edge web is what collapses a dense graph into a blob, so `vertices` must
+ *    drop the edges while keeping the dots, and `motion` must drop the graph entirely — it is
+ *    the view that exists to show the robot rather than the search. The solution survives all
+ *    three, because it is what the reader came for. */
 {
   const { canvas, ops } = stubCanvas();
   const player = createTracePlayer({ canvas, scene });
@@ -189,10 +194,10 @@ const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
   assert.equal(vertices.dots, graph.dots, 'vertices mode lost the dots');
   assert.equal(vertices.path, graph.path, 'vertices mode lost the solution');
 
-  const pathOnly = draw('path');
-  assert.equal(pathOnly.edges, 0);
-  assert.equal(pathOnly.dots, 0, 'path mode still drew graph vertices');
-  assert.equal(pathOnly.path, graph.path, 'path mode lost the solution it is named after');
+  const motion = draw('motion');
+  assert.equal(motion.edges, 0);
+  assert.equal(motion.dots, 0, 'motion mode still drew graph vertices');
+  assert.ok(motion.path > graph.path, 'motion mode drew no more of the solution than a tip curve');
 
   assert.throws(() => player.setViewMode('blob'), /unknown mode/);
 }
@@ -231,8 +236,8 @@ const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
     'the vertexCount prefix did not reach the tally'
   );
 
-  /* `path` draws no vertices, so this answer comes from the standalone walk, not drawFrame. */
-  player.setViewMode('path');
+  /* `motion` draws no vertices, so this answer comes from the standalone walk, not drawFrame. */
+  player.setViewMode('motion');
   player.redraw();
   assert.deepEqual(player.treeCounts(), { start: 1, goal: 1, section: 0, untagged: 0 });
 }
@@ -253,4 +258,92 @@ const q8 = (base) => Array.from({ length: 8 }, (_, i) => base + i / 10);
   assert.equal(player.treeSource, 'planner');
 }
 
-console.log('renderer.test.mjs: 9 groups ok');
+/* 10. Interpolation. densifyPath is what makes the animation the planner's motion rather than a
+ *     drawing of it: the space goes the short way round the branch cut (kinematic_chain.h:114-139)
+ *     and the motion validator checked every solution segment under exactly that rule. A naive
+ *     lerp between +PI and -1.27 would sweep 4.41 rad through poses nobody validated instead of
+ *     1.87 the other way, and on scene1 it reports a tip arc of 2.33 against the true 0.875. */
+{
+  const from = [Math.PI, 0, 0, 0, 0, 0, 0, 0];
+  const to = [-1.27, 0, 0, 0, 0, 0, 0, 0];
+  const dense = densifyPath([from, to], 16);
+
+  assert.equal(dense.length, 17, 'one segment at 16 substeps is 17 configurations');
+  assert.deepEqual(dense[0], from, 'the start configuration was not kept exactly');
+  assert.deepEqual(dense[dense.length - 1], to, 'the goal configuration was not kept exactly');
+
+  /* Every step is short and every configuration stays inside the space's own bounds. */
+  let travelled = 0;
+  for (let i = 1; i < dense.length; i++) {
+    const step = dense[i][0] - dense[i - 1][0];
+    const wrapped = Math.abs(step) > Math.PI ? 2 * Math.PI - Math.abs(step) : Math.abs(step);
+    travelled += wrapped;
+    assert.ok(wrapped < 0.2, `step ${i} jumped ${wrapped.toFixed(3)} rad`);
+    for (const v of dense[i]) assert.ok(v >= -Math.PI && v <= Math.PI, `${v} left [-PI, PI]`);
+  }
+  assert.ok(
+    Math.abs(travelled - 1.8716) < 0.01,
+    `joint 0 travelled ${travelled.toFixed(4)} rad, expected the short way round (1.8716)`
+  );
+
+  /* Half way along the short route is past the branch cut: +PI plus 0.936 wraps to -2.206, where
+   * a naive lerp would sit at +0.936, on the other side of the circle. */
+  assert.ok(
+    Math.abs(interpolateConfig(from, to, 0.5)[0] + 2.2058) < 0.01,
+    'interpolation did not cross the branch cut the short way'
+  );
+
+  assert.deepEqual(densifyPath([], 4), []);
+  assert.deepEqual(densifyPath([from], 4), [from]);
+}
+
+/* 11. Colliding poses. The planner guarantees its path states, not the poses between them: on
+ *     scene1 its motion validator checks one interior state on a segment whose arms sweep
+ *     through an obstacle. The player must take the page's predicate, flag exactly the poses it
+ *     rejects, draw them in COLLISION_COLOR, and report them — a viewer that smoothed over this
+ *     would be hiding the defect that made it worth building. */
+{
+  const { canvas, ops } = stubCanvas();
+  const player = createTracePlayer({ canvas, scene });
+  const a = q8(0);
+  const b = q8(0.05);
+
+  /* Reject the middle third of the interpolation, whatever its length. */
+  const dense = densifyPath([a, b]);
+  const bad = new Set();
+  for (let i = Math.floor(dense.length / 3); i < Math.floor((2 * dense.length) / 3); i++) {
+    bad.add(dense[i].join(','));
+  }
+  player.setViewMode('motion');
+  player.showPath([a, b], (q) => !bad.has(q.join(',')));
+
+  const report = player.motionCollisions();
+  assert.equal(report.total, dense.length);
+  assert.equal(report.count, bad.size, 'the player flagged a different number of poses');
+  assert.equal(report.from, Math.floor(dense.length / 3));
+  assert.equal(report.to, Math.floor((2 * dense.length) / 3) - 1);
+
+  const strokesAt = (t) => {
+    ops.length = 0;
+    player.setPhase(t);
+    player.redraw();
+    return {
+      red: countOps(ops, 'stroke', COLLISION_COLOR),
+      green: countOps(ops, 'stroke', PATH_COLOR),
+    };
+  };
+  assert.ok(strokesAt(0.5).red > 0, 'a rejected pose was not drawn in the collision colour');
+  assert.equal(strokesAt(0).red, 0, 'an accepted pose was drawn as colliding');
+  assert.ok(strokesAt(0).green > 0);
+
+  /* No predicate means no claim: nothing is flagged rather than everything being called valid. */
+  player.showPath([a, b]);
+  assert.deepEqual(player.motionCollisions(), {
+    count: 0,
+    total: dense.length,
+    from: -1,
+    to: -1,
+  });
+}
+
+console.log('renderer.test.mjs: 11 groups ok');

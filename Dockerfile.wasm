@@ -127,9 +127,10 @@ RUN emcmake cmake -S /src/ompl -B /src/ompl/build \
 
 COPY mlmp /src/mlmp
 COPY web /src/web
-# Only to prove docs/renderer.js has not drifted from web/src/renderer.js; the page uses the
-# latter. The two copies exist because docs/ must stay servable straight from the branch.
+# Only to prove the docs/ copies have not drifted from web/src/; the pages under web/ use the
+# latter. The duplicates exist because docs/ must stay servable straight from the branch.
 COPY docs/renderer.js /src/docs-renderer.js
+COPY docs/cspace.js /src/docs-cspace.js
 
 RUN emcmake cmake -S /src/mlmp -B /src/mlmp/build \
         -DCMAKE_BUILD_TYPE=Release \
@@ -142,10 +143,11 @@ RUN emcmake cmake -S /src/mlmp -B /src/mlmp/build \
 # beside it with no locateFile override.
 RUN set -eu; \
     cmp /src/web/src/renderer.js /src/docs-renderer.js; \
+    cmp /src/web/src/cspace.js /src/docs-cspace.js; \
     mkdir -p /out/src /out/scenes; \
     cp /src/web/index.html /out/index.html; \
     cp /src/web/src/main.js /src/web/src/worker.js /src/web/src/editor.js \
-       /src/web/src/app.css /src/web/src/renderer.js /out/src/; \
+       /src/web/src/app.css /src/web/src/renderer.js /src/web/src/cspace.js /out/src/; \
     cp /src/mlmp/build/mlmp.mjs /src/mlmp/build/mlmp.wasm /out/src/; \
     cp /src/mlmp/src/inputs/experiment/scene*.json /out/scenes/; \
     python3 -c "import json, os; d = '/out/scenes'; \

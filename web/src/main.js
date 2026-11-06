@@ -6,10 +6,14 @@
  * the committed fixtures. At the 10 s maximum the frame cap cannot be reached; truncation is
  * surfaced anyway. */
 import { PATH_COLOR, TREE_COLORS, createTracePlayer } from './renderer.js';
+import { createCSpaceView, isValidConfig } from './cspace.js';
 import { createSceneEditor } from './editor.js';
 
 const TRACE_INTERVAL_MS = 50;
 const TRACE_MAX_FRAMES = 400;
+/* Interpolated poses per second of solution playback. Same rate as the trace explorer, so the
+ * two surfaces move at the same speed. */
+const POSES_PER_SECOND = 45;
 const DEFAULT_SCENE = 'scene1.json';
 
 const el = {
@@ -20,19 +24,27 @@ const el = {
   seed: document.getElementById('seed'),
   solve: document.getElementById('solve'),
   addObstacle: document.getElementById('addObstacle'),
-  levels: document.getElementById('levels'),
+  levelSelect: document.getElementById('levelSelect'),
   legend: document.getElementById('legend'),
   view: document.getElementById('view'),
   treeSource: document.getElementById('treeSource'),
   canvas: document.getElementById('canvas'),
+  cspaceCanvas: document.getElementById('cspace'),
+  cspaceCaption: document.getElementById('cspaceCaption'),
   status: document.getElementById('status'),
   result: document.getElementById('result'),
 };
 
 const state = {
   player: null,
+  cspace: null,
   editor: null,
   levels: new Set(),
+  /* Solution playback: `phase` is where the arms stand along the interpolated path, advanced by
+   * the animation loop while `animating`. A run with no solution never animates. */
+  phase: 0,
+  animating: false,
+  lastTick: 0,
   /* legend entry name -> its <span>, so a redraw can dim the colours this run has none of. */
   legend: new Map(),
   hasPath: false,
@@ -121,6 +133,70 @@ function explainError(error) {
   return `${error.kind}: ${error.message}`;
 }
 
+/* While a run is in flight the page shows the search whatever the view select says: `motion` has
+ * nothing to play until a solution exists, and watching the trees grow is the reason to run a
+ * planner in a browser at all. The status line says so, so it is not a silent override. */
+function effectiveView() {
+  if (state.inFlight !== null && el.view.value === 'motion') return 'graph';
+  return el.view.value;
+}
+
+/* One redraw of both canvases plus the editor's handles, which have to go back on top of a fresh
+ * frame or dragging an obstacle loses its selection outline. */
+function redrawAll() {
+  state.player.redraw();
+  if (state.cspace) state.cspace.redraw();
+  if (state.editor) state.editor.drawOverlay();
+}
+
+/* The playback clock. It runs only while there is a solution to play and the view asks for it, so
+ * an idle page costs no frames. */
+function animate(now) {
+  if (!state.animating) return;
+  const states = state.player.motionStates;
+  if (states > 1) {
+    const elapsed = state.lastTick > 0 ? now - state.lastTick : 0;
+    state.phase += (elapsed / 1000) * (POSES_PER_SECOND / (states - 1));
+    /* Loop with a pause at the goal: the solution reads as a repeated motion, not a cycle that
+     * snaps back mid-stride. */
+    if (state.phase > 1.25) state.phase = 0;
+    const shown = Math.min(1, state.phase);
+    state.player.setPhase(shown);
+    if (state.cspace) state.cspace.setPhase(shown);
+    redrawAll();
+  }
+  state.lastTick = now;
+  requestAnimationFrame(animate);
+}
+
+function syncAnimation() {
+  const wanted = effectiveView() === 'motion' && state.player.motionStates > 1;
+  if (wanted === state.animating) return;
+  state.animating = wanted;
+  state.lastTick = 0;
+  if (wanted) requestAnimationFrame(animate);
+}
+
+/* The single place a solution enters the page: both canvases get the same interpolated path, so
+ * the arms in the workspace and the dot in configuration space are the same configuration. */
+function showSolution(path) {
+  state.phase = 0;
+  /* The same predicate the C++ checker runs, applied to the poses actually drawn: the planner
+   * guarantees its path states, not what the arms sweep through between them, and its motion
+   * validator can sample a segment as coarsely as one interior check. */
+  const scene = state.player.scene;
+  const top = scene.metadata.n - 1;
+  state.player.showPath(path, (q) => isValidConfig(scene, top, q));
+  state.player.setPhase(0);
+  if (state.cspace) {
+    state.cspace.showPath(state.player.motionPath);
+    state.cspace.setPhase(0);
+  }
+  state.player.setViewMode(effectiveView());
+  redrawAll();
+  syncAnimation();
+}
+
 function renderResult(result) {
   if (result.error) {
     setStatus(explainError(result.error));
@@ -129,8 +205,7 @@ function renderResult(result) {
       ['message', result.error.message],
     ]);
     state.hasPath = false;
-    state.player.showPath(null);
-    state.player.redraw();
+    showSolution(null);
     syncLabels();
     return;
   }
@@ -160,8 +235,22 @@ function renderResult(result) {
   ]);
 
   state.hasPath = Boolean(result.solved && result.path && result.path.length > 0);
-  state.player.showPath(result.solved ? result.path : null);
-  state.player.redraw();
+  showSolution(state.hasPath ? result.path : null);
+  /* Appended after showSolution, because that is what runs the checker over the drawn poses. A
+   * solved run whose animation passes through an obstacle is the most important thing this page
+   * can tell its reader, so it belongs in the result list and not in a tooltip. */
+  if (state.hasPath) {
+    const { count, total, from, to } = state.player.motionCollisions();
+    const where = from === to ? `pose ${from + 1}` : `poses ${from + 1}-${to + 1}`;
+    const dt = document.createElement('dt');
+    dt.textContent = 'collisions';
+    const dd = document.createElement('dd');
+    dd.textContent = count === 0
+      ? `none — all ${total} drawn poses are collision-free`
+      : `${count} of ${total} drawn poses (${where})`;
+    el.result.appendChild(dt);
+    el.result.appendChild(dd);
+  }
   syncLabels();
   state.editor.drawOverlay();
 }
@@ -188,9 +277,19 @@ function startSolve(message) {
   if (!worker) return;
   state.inFlight = message.id;
   state.pending = null;
-  setStatus(`solving ${message.algo} for ${message.timeLimitS} s…`);
+  setStatus(
+    el.view.value === 'motion'
+      ? `solving ${message.algo} for ${message.timeLimitS} s — showing the search until it finds one…`
+      : `solving ${message.algo} for ${message.timeLimitS} s…`
+  );
   state.hasPath = false;
   state.player.reset();
+  state.player.setViewMode(effectiveView());
+  if (state.cspace) {
+    state.cspace.showPath([]);
+    state.cspace.reset();
+  }
+  syncAnimation();
   syncLabels();
   worker.postMessage(message);
 }
@@ -240,6 +339,7 @@ function onWorkerMessage(event) {
   if (msg.id !== state.inFlight) return; // a superseded run's tail
   if (msg.type === 'frame') {
     state.player.pushFrame(msg.frame);
+    if (state.cspace) state.cspace.pushFrame(msg.frame);
     syncLabels();
     state.editor.drawOverlay();
     return;
@@ -254,26 +354,30 @@ function onWorkerMessage(event) {
   }
 }
 
-function buildLevelToggles(links) {
-  el.levels.textContent = '';
-  state.levels = new Set();
+/* One level at a time, defaulting to the top one — the level that is the whole robot. Every level
+ * at once is what turned four levels of two robots into 37 000 superimposed dots. */
+function buildLevelSelect(links) {
+  el.levelSelect.textContent = '';
+  const options = [['all', 'all levels']];
   for (let i = 0; i < links; i++) {
-    state.levels.add(i);
-    const label = document.createElement('label');
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.checked = true;
-    box.addEventListener('change', () => {
-      if (box.checked) state.levels.add(i);
-      else state.levels.delete(i);
-      state.player.setLevels(state.levels);
-      state.player.redraw();
-      syncLabels();
-      state.editor.drawOverlay();
-    });
-    label.appendChild(box);
-    label.appendChild(document.createTextNode(`L${i}`));
-    el.levels.appendChild(label);
+    options.push([String(i), `level ${i} · ${i + 1} link${i ? 's' : ''}`]);
+  }
+  for (const [value, label] of options) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    el.levelSelect.appendChild(option);
+  }
+  el.levelSelect.value = String(links - 1);
+  applyLevelSelection(links);
+}
+
+function applyLevelSelection(links) {
+  state.levels = new Set();
+  if (el.levelSelect.value === 'all') {
+    for (let i = 0; i < links; i++) state.levels.add(i);
+  } else {
+    state.levels.add(Number(el.levelSelect.value));
   }
   state.player.setLevels(state.levels);
 }
@@ -330,17 +434,41 @@ async function loadScene(name) {
   const scene = await loadJson(`scenes/${name}`);
   if (state.player) state.player.setScene(scene);
   else state.player = createTracePlayer({ canvas: el.canvas, scene });
+  if (state.cspace) state.cspace.setScene(scene);
+  else state.cspace = createCSpaceView({ canvas: el.cspaceCanvas, scene });
   if (state.editor) state.editor.setScene(scene);
   else state.editor = createSceneEditor({ canvas: el.canvas, player: state.player, scene });
   state.editor.setAddMode(el.addObstacle.checked);
-  state.player.setViewMode(el.view.value);
+  state.player.setViewMode(effectiveView());
   state.hasPath = false;
-  buildLevelToggles(scene.metadata.n);
-  state.player.redraw();
+  buildLevelSelect(scene.metadata.n);
+  showSolution(null);
+  syncCSpaceCaption();
   syncLabels();
   showResult([['status', '—']]);
   syncSolveEnabled();
   setStatus(state.ready ? `${name} loaded` : 'loading the planner…');
+}
+
+function syncCSpaceCaption() {
+  if (!state.cspace) return;
+  if (!state.cspace.available) {
+    const robots = state.player.scene.robots.length;
+    el.cspaceCaption.textContent =
+      `no 2-D bundle level in this scene — ${robots} robots, so the lowest level is already `
+      + 'higher-dimensional';
+    return;
+  }
+  const blocked = state.cspace.blockedFraction;
+  const level = state.cspace.level;
+  /* An almost-empty square is a fact about the problem, not a missing layer: the bottom of the
+   * hierarchy is nearly unobstructed, which is why it is cheap to solve and tells the level
+   * above very little. */
+  el.cspaceCaption.textContent = blocked < 0.02
+    ? `configuration space of level ${level} · ${(100 * (1 - blocked)).toFixed(1)}% free — links `
+      + 'this short can barely reach an obstacle'
+    : `configuration space of level ${level} · grey is where the arms collide `
+      + `(${(100 * blocked).toFixed(0)}% of it)`;
 }
 
 /* An edit invalidates the previous solution: setScene inside the editor has already dropped the
@@ -361,13 +489,22 @@ el.solve.addEventListener('click', () => {
   requestSolve(state.editor.scene);
 });
 el.addObstacle.addEventListener('change', () => state.editor.setAddMode(el.addObstacle.checked));
-el.planner.addEventListener('change', cancelInFlight);
 el.view.addEventListener('change', () => {
   if (!state.player) return;
-  state.player.setViewMode(el.view.value);
-  state.player.redraw();
+  state.player.setViewMode(effectiveView());
+  el.levelSelect.disabled = el.view.value === 'motion';
+  state.phase = 0;
+  state.player.setPhase(0);
+  if (state.cspace) state.cspace.setPhase(0);
+  redrawAll();
+  syncAnimation();
   syncLabels();
-  if (state.editor) state.editor.drawOverlay();
+});
+el.levelSelect.addEventListener('change', () => {
+  if (!state.player) return;
+  applyLevelSelection(state.player.links);
+  redrawAll();
+  syncLabels();
 });
 el.scene.addEventListener('change', () => {
   /* Cancel before the scene swaps: a surviving frame from the old run would be drawn with the
@@ -377,11 +514,11 @@ el.scene.addEventListener('change', () => {
 });
 window.addEventListener('resize', () => {
   if (!state.player) return;
-  state.player.redraw();
-  state.editor.drawOverlay();
+  redrawAll();
 });
 
 el.solve.disabled = true;
+el.levelSelect.disabled = el.view.value === 'motion';
 buildLegend();
 
 (async () => {

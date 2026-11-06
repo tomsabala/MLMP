@@ -10,11 +10,14 @@
 <header>
   <h1>MLMP live planner</h1>
   <p>The same C++ planner the CLI runs, compiled to WebAssembly and solving in a worker. Edit the
-     obstacles, pick a planner, and watch the bundle-space trees grow: colour is tree membership,
-     opacity is bundle level, each dot is one robot's chain tip at that vertex's bundle level, and
-     the solution is drawn in green as each robot's tip trajectory between its start and goal
-     arms. Switch the view to <em>vertices only</em> or <em>path only</em> when the edge web
-     hides the result.</p>
+     obstacles, pick a planner, and watch the bundle-space trees grow; when a run solves, the arms
+     play the solution, interpolated in joint space exactly as the planner's motion validator
+     checked it. Every dot is one robot's chain tip at that vertex's bundle level, and a
+     level-<em>L</em> vertex owns only its first <em>L</em>+1 links — so read the search one level
+     at a time.</p>
+  <p>The second canvas is the real configuration space of this scene's 2-D bundle level: each axis
+     is one joint angle over [−π, π], grey is where the arms collide, and the tree is drawn in the
+     space the planner searches rather than projected into the workspace.</p>
 </header>
 
 <section class="controls">
@@ -48,12 +51,14 @@
   <label><input id="addObstacle" type="checkbox"> Add obstacle</label>
   <label>View
     <select id="view">
-      <option value="graph" selected>graph + edges</option>
-      <option value="vertices">vertices only</option>
-      <option value="path">path only</option>
+      <option value="motion" selected>solution motion</option>
+      <option value="graph">search tree + edges</option>
+      <option value="vertices">search vertices</option>
     </select>
   </label>
-  <span id="levels" class="levels"></span>
+  <label>Levels
+    <select id="levelSelect"></select>
+  </label>
   <span id="legend" class="legend"></span>
   <span id="treeSource" class="source">trees: reported by the planner</span>
 </section>
@@ -62,6 +67,8 @@
   <figure>
     <canvas id="canvas" width="640" height="640" tabindex="0"></canvas>
     <figcaption id="status">loading the planner…</figcaption>
+    <canvas id="cspace" class="cspace" width="640" height="640"></canvas>
+    <figcaption id="cspaceCaption" class="sub">configuration space</figcaption>
   </figure>
   <aside>
     <h2>Result</h2>
@@ -76,7 +83,8 @@
 
 <footer>
   <p>Built from <code>Dockerfile.wasm</code>; drawing is shared with the
-     <a href="../">committed-trace player</a>. Source:
+     <a href="../explorer/">committed-trace player</a>. See also the
+     <a href="../">project overview</a>. Source:
      <a href="https://github.com/tomsabala/MLMP">tomsabala/MLMP</a>.</p>
 </footer>
 

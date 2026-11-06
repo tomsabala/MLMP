@@ -1,0 +1,357 @@
+/* The overview page's entire design: no framework, no web font, no build step, no script — this
+ * file is it. Everything that varies (type sizes, spacing steps, radii, colours) is a custom
+ * property at :root, so a change lands in one place instead of in the rules below it.
+ *
+ * The same token block opens docs/style.css and web/src/app.css. It is duplicated rather than
+ * @imported because the three pages ship from three directories of one container image
+ * (/a/mlmp/, /a/mlmp/explorer/, /a/mlmp/live/): a shared sheet would cost every page a second
+ * render-blocking request to save forty lines. Type scale, spacing grid, radii and palette are
+ * byte-identical in all three; the width and control tokens are per page, because the overview
+ * has no canvas and no control bar. Change a shared token in one sheet, change it in all three.
+ *
+ * Two width tiers, not one. Prose sits in a 40rem column (~72 characters at this size, the
+ * measure the eye tracks without losing the line); the hero still, the demo cards and the
+ * OMPL-versus-mine table break out to the full 60rem, because a 1100 px GIF and a two-column
+ * table are pictures, not sentences, and clamping them to the text column wastes both. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Type scale: 12 → 44 px. The page's own h1 is fluid between the last two steps. */
+  --fs-1: .75rem;
+  --fs-2: .8125rem;
+  --fs-3: .875rem;
+  --fs-4: 1rem;
+  --fs-5: 1.125rem;
+  --fs-6: 1.375rem;
+  --fs-7: 1.75rem;
+
+  /* Spacing: one 4 px grid, used for every margin, padding and gap on the page. */
+  --s-1: .25rem;
+  --s-2: .5rem;
+  --s-3: .75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+
+  --r-1: 5px;
+  --r-2: 8px;
+  --r-3: 12px;
+
+  --measure: 40rem;
+  --wide: 60rem;
+
+  --bg: light-dark(#fcfcfd, #0e1014);
+  --surface: light-dark(#ffffff, #15181e);
+  --surface-2: light-dark(#f3f4f6, #1c2027);
+  --line: light-dark(#e3e5ea, #272c35);
+  --line-strong: light-dark(#c8ccd4, #3b414c);
+  --fg: light-dark(#15171c, #e6e8ee);
+  --fg-muted: light-dark(#5a6069, #9aa1ac);
+  --fg-faint: light-dark(#858b95, #767d89);
+  --accent: light-dark(#1a5fd0, #6aa8ff);
+  --accent-hover: light-dark(#164ead, #8dbdff);
+  --accent-fg: light-dark(#ffffff, #0e1014);
+
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-4) var(--s-7);
+  max-width: var(--wide);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: var(--fs-4);
+  line-height: 1.65;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover { color: var(--accent-hover); text-decoration-thickness: 2px; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-1);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: .9em;
+  overflow-wrap: anywhere;
+  padding: .1em .3em;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+/* The prose tier: a measure-wide column anchored to the page's left edge, with the hero, the
+ * cards and the table breaking out past its right edge. Centring the column instead would
+ * indent every heading 160 px from the pictures above it, which reads as a mistake. */
+section > :is(h2, h3, p, ul, pre) {
+  max-width: var(--measure);
+  margin-inline: 0;
+}
+
+/* --- Masthead: the whole of what this is, above the fold --------------------------------- */
+
+.masthead { margin: 0 0 var(--s-6); }
+.masthead :is(.lede, .meta) { max-width: var(--measure); }
+
+h1 {
+  margin: 0 0 var(--s-4);
+  font-size: clamp(2rem, 1.4rem + 2.2vw, 2.75rem);
+  font-weight: 650;
+  letter-spacing: -.025em;
+  line-height: 1.08;
+}
+
+/* "MLMP — multilevel motion planning" is a name and a definition. Setting the definition
+ * lighter lets the name carry the first glance without a second type size. */
+h1 .sub { font-weight: 400; color: var(--fg-muted); }
+h1 .sep { color: var(--fg-faint); font-weight: 400; }
+
+.lede {
+  margin: 0 0 var(--s-4);
+  font-size: var(--fs-5);
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s-2);
+  margin: 0;
+  font-size: var(--fs-2);
+  color: var(--fg-muted);
+}
+
+.meta span + span::before {
+  content: "·";
+  margin-right: var(--s-2);
+  color: var(--fg-faint);
+}
+
+/* --- Demo cards: the page's primary action, so they get the page's largest clickable area -- */
+
+.demos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: var(--s-4);
+  margin: 0 0 var(--s-7);
+}
+
+.demos a {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: var(--s-2);
+  padding: var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+
+.demos a:hover, .demos a:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.demos .kind {
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.demos h2 {
+  margin: 0;
+  font-size: var(--fs-6);
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+.demos p { margin: 0; font-size: var(--fs-3); color: var(--fg-muted); }
+
+.demos .go {
+  margin-top: var(--s-2);
+  font-size: var(--fs-3);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.demos .go::after { content: "\00a0→"; }
+
+/* --- Hero: the wide tier, caption back in the measure ------------------------------------ */
+
+.hero { margin: 0 0 var(--s-7); }
+
+.hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.hero figcaption {
+  max-width: var(--measure);
+  margin: var(--s-3) 0 0;
+  font-size: var(--fs-3);
+  color: var(--fg-muted);
+}
+
+/* --- Sections ----------------------------------------------------------------------------- */
+
+section { margin-bottom: var(--s-7); }
+
+h2 {
+  margin: 0 0 var(--s-4);
+  font-size: var(--fs-6);
+  font-weight: 600;
+  letter-spacing: -.015em;
+  line-height: 1.25;
+}
+
+h3 {
+  margin: var(--s-5) 0 var(--s-2);
+  font-size: var(--fs-4);
+  font-weight: 600;
+}
+
+p { margin: 0 0 var(--s-4); }
+
+.specs { margin: 0; padding-left: 1.1rem; }
+.specs li { margin-bottom: var(--s-2); }
+.specs li::marker { color: var(--fg-faint); }
+
+/* --- The OMPL-versus-mine table, wide tier ------------------------------------------------ */
+
+section.wide > table {
+  width: 100%;
+  margin: 0 0 var(--s-5);
+  border-collapse: collapse;
+  font-size: var(--fs-3);
+}
+
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--s-3) var(--s-4) var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  padding-top: 0;
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  border-bottom-color: var(--line-strong);
+}
+
+tbody td:first-child { color: var(--fg-muted); width: 44%; }
+
+/* Inline <code> carries .3em of side padding, so a cell that opens with one sits a few pixels
+ * right of the cells that open with plain text — a visibly crooked left edge down the column. */
+td > code:first-child { margin-left: -.3em; }
+
+/* --- The measured results, read as rows rather than as a sentence ------------------------- */
+
+.results {
+  max-width: var(--measure);
+  margin: 0 0 var(--s-5);
+  padding: 0;
+  list-style: none;
+}
+
+.results li {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: var(--s-2) var(--s-4);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.results li:first-child { border-top: 1px solid var(--line); }
+.r-k { font-family: var(--mono); font-size: var(--fs-2); color: var(--fg-muted); }
+.r-v { font-size: var(--fs-3); }
+
+/* The one sentence a reader should leave with. It is a claim about what is *not* claimed, so it
+ * gets the page's accent and nothing else — no box, no colour fill. */
+.claim {
+  padding-left: var(--s-4);
+  border-left: 3px solid var(--accent);
+  font-size: var(--fs-5);
+  line-height: 1.5;
+}
+
+/* --- Command block ------------------------------------------------------------------------ */
+
+pre {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-4);
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  font-size: var(--fs-2);
+  line-height: 1.5;
+}
+
+pre code { padding: 0; background: none; font-size: inherit; }
+
+footer {
+  max-width: var(--measure);
+  margin: 0;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-3);
+  color: var(--fg-muted);
+}
+
+footer p { margin: 0; }
+
+@media (max-width: 40rem) {
+  body { padding: var(--s-6) var(--s-4); }
+  .demos a { padding: var(--s-4); }
+
+  /* A two-column table at 390 px is two 150 px columns of broken words. Each cell becomes its
+   * own row under the column name it belonged to; the header row is then redundant. */
+  section.wide > table thead { display: none; }
+  section.wide > table tr {
+    display: block;
+    padding: var(--s-3) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  section.wide > table td { display: block; width: auto; padding: 0; border: 0; }
+  section.wide > table td + td { margin-top: var(--s-2); }
+
+  section.wide > table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: var(--fs-1);
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .results li { grid-template-columns: 1fr; gap: var(--s-1); }
+}

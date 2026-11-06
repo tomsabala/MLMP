@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLMP — multilevel motion planning</title>
+<meta name="description" content="Multi-robot 2D kinematic chains and a 6-DOF UR5 arm, planned on OMPL bundle spaces by a custom bidirectional planner — recorded, replayable, and runnable in your browser.">
+<link rel="stylesheet" href="overview.css">
+</head>
+<body>
+<header class="masthead">
+  <h1>MLMP<span class="sep"> — </span><span class="sub">multilevel motion planning</span></h1>
+  <p class="lede">Multi-robot 2D kinematic chains and a 6-DOF UR5 arm, planned on OMPL bundle
+     spaces by a custom bidirectional planner — recorded, replayable, and runnable in your
+     browser.</p>
+  <p class="meta">
+    <span>C++17</span><span>OMPL 1.7.0</span><span>WebAssembly</span><span>Canvas</span>
+  </p>
+</header>
+
+<nav class="demos" aria-label="Demos">
+  <a href="explorer/">
+    <span class="kind">Recorded</span>
+    <h2>Trace Explorer</h2>
+    <p>Watch the arms play a recorded BiQRRT solution beside QRRT on the same scene and seed,
+       then switch to the search that produced it — one bundle level at a time, in the workspace
+       and in the configuration space the planner really works in.</p>
+    <span class="go">Replay a run</span>
+  </a>
+  <a href="live/">
+    <span class="kind">Live, in your browser</span>
+    <h2>Interactive Planner</h2>
+    <p>The same C++ solver compiled to WebAssembly. Drag an obstacle, pick one of 11 planners,
+       set a seed and a budget, watch the trees grow, and see the arms run the solution it
+       finds.</p>
+    <span class="go">Solve a scene</span>
+  </a>
+</nav>
+
+<figure class="hero">
+  <img src="explorer/solution-motion.gif"
+       alt="Two 4-link arms moving along a BiQRRT solution on scene1, past two obstacles">
+  <figcaption>The solution BiQRRT found on scene1 at seed 42, played back. Four simplified path
+     states densified to 73 configurations by the planner's own joint-space interpolation; the
+     thin curves are what each arm's tip traces out. The arms never touch the obstacles, each
+     other, or themselves — that is the entire constraint, in eight dimensions.</figcaption>
+</figure>
+
+<section>
+  <h2>The problem</h2>
+  <p>Two 4-link planar arms sharing a workspace have an 8-dimensional configuration space, and the
+     valid part of it is mostly thin: a sampled configuration is valid only if no arm
+     self-intersects, the arms do not touch each other, and neither touches an obstacle. Sampling
+     that space directly is how a planner spends a whole budget without finding anything.
+     Multilevel (bundle-space) planning attacks it by solving an easier problem first: plan for
+     1-link arms, then use that solution to bias the search for 2-link arms, and so on up to the
+     full chain. Each level is a projection of the next, so a lower-level solution is a prefix of
+     a higher-level one.</p>
+</section>
+
+<section>
+  <h2>Architecture</h2>
+  <ul class="specs">
+    <li>One C++17 CLI (<code>mlmp</code>) on OMPL 1.7.0.</li>
+    <li><code>Solver::solve(const RunOptions&amp;) -&gt; RunResult</code> does no I/O, so the same
+        function backs the CLI, the trace recorder and the WebAssembly entry point.</li>
+    <li>One <code>mlmp.run/1</code> JSON object on stdout per run, and an
+        <code>mlmp.trace/1</code> JSONL stream per traced run.</li>
+    <li>The browser build is the same sources through Emscripten
+        (<code>Dockerfile.wasm</code>), single-threaded on purpose so it needs no COOP/COEP
+        headers.</li>
+    <li>469&nbsp;034&nbsp;B + 22&nbsp;445&nbsp;B <code>gzip -9</code> for
+        <code>mlmp.wasm</code> + <code>mlmp.mjs</code> — 9.4% of the repository's 5&nbsp;MiB
+        payload gate — and it runs at ≈0.65× native throughput (measured,
+        BiQRRT/scene1/seed&nbsp;42/10&nbsp;s: 8&nbsp;104 vertices native vs 5&nbsp;379 in the
+        browser).</li>
+  </ul>
+</section>
+
+<section class="wide">
+  <h2>What I implemented</h2>
+  <table>
+    <thead>
+      <tr><th>OMPL 1.7.0 supplies</th><th>This repository supplies</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td data-label="OMPL 1.7.0 supplies"><code>BundleSpaceSequence</code>,
+            <code>BundleSpaceGraph</code> and the projections between levels</td>
+        <td data-label="This repository supplies"><code>BiQRRT</code>, a bidirectional
+            bundle-space planner (<code>mlmp/src/planner/</code>)</td>
+      </tr>
+      <tr>
+        <td data-label="OMPL 1.7.0 supplies"><code>QRRT</code>, <code>QRRTStar</code>,
+            <code>QMP</code>, <code>QMPStar</code> and the seven single-level baselines</td>
+        <td data-label="This repository supplies">The bundle hierarchy for teams of planar
+            chains, and the scene, geometry and validity checking under it</td>
+      </tr>
+      <tr>
+        <td data-label="OMPL 1.7.0 supplies">Path simplification and the sampling
+            infrastructure</td>
+        <td data-label="This repository supplies">The <code>mlmp.run/1</code> contract, the
+            <code>mlmp.trace/1</code> recorder and the <code>mlmp.traceviz/1</code> packer</td>
+      </tr>
+      <tr>
+        <td data-label="OMPL 1.7.0 supplies">—</td>
+        <td data-label="This repository supplies">The Emscripten port, the two viewers, and the
+            URDF path (serial-chain flattening, FCL narrowphase, 0.02 rad collision step)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p><code>QRRT</code> grows one tree per bundle level outward from the start and reaches the goal
+     through random sampling and the level's <code>findSection()</code> lift.
+     <code>BiQRRTImpl</code> subclasses <code>BundleSpaceGraph</code> and keeps
+     <strong>two</strong> nearest-neighbour structures per level, <code>treeStart_</code> and
+     <code>treeGoal_</code>. Each <code>grow()</code> call swaps the active tree, samples the
+     bundle, clips the extension to <code>maxDistance_</code>, steers, adds the new vertex to the
+     active tree — and then tries to steer straight from it to its nearest neighbour in the
+     <em>other</em> tree. A successful steer adds that edge and marks the level solved. Both trees
+     exist at every level of the hierarchy, so the bidirectional search and the multilevel
+     decomposition compose rather than compete.</p>
+</section>
+
+<section>
+  <h2>What the visualizations show</h2>
+  <p>Three pictures of the same run, because a planner is three different things at once.</p>
+
+  <h3>The motion</h3>
+  <p>The default view plays the solution as the arms themselves, interpolated in joint space by
+     the same wrap-aware rule (<code>KinematicChainSpace::interpolate</code>) the motion validator
+     checked each segment under — so every pose on screen is one the checker accepted, not a guess
+     between waypoints. It matters: on scene1 the straight workspace lines an earlier version drew
+     between the four simplified path states missed the true tip curve by up to 0.083 units on a
+     scene 1.09 wide, about 46 px at a 600 px canvas.</p>
+
+  <h3>The search</h3>
+  <p>Every vertex is one configuration the planner actually committed to, drawn at the chain tip
+     of the links its bundle level owns — read one level at a time, because all four at once is
+     37 000 overlapping dots and no information. BiQRRT tags its two trees itself, so blue and red
+     are the planner's own bookkeeping; QRRT tags nothing, so the binary derives the same labels
+     by breadth-first search from the start and goal vertices over the frame's edges, and every
+     frame records which of the two it was (<code>tree_source</code>: <code>planner</code> or
+     <code>derived</code>). The purple <code>findSection()</code> configurations exist whether or
+     not a run ever solves.</p>
+
+  <h3>The configuration space itself</h3>
+  <p>A bundle level whose dimension is two — level 0 of a two-robot scene, level 1 of a one-robot
+     scene — can be drawn exactly: both axes are joint angles over [−π, π], and the grey region is
+     computed by running the real collision predicate over a grid, the same segment-intersection
+     test the C++ checker uses. The tree appears there in the space it is actually searched in,
+     and configurations from higher levels project into the same square, because that projection
+     is what a bundle space <em>is</em>.</p>
+</section>
+
+<section>
+  <h2>What is measured, and what is not</h2>
+  <ul class="results">
+    <li>
+      <span class="r-k">scene1</span>
+      <span class="r-v">BiQRRT solved 2/3 at a 10 s budget, seeds 41–43</span>
+    </li>
+    <li>
+      <span class="r-k">scene5</span>
+      <span class="r-v">BiQRRT solved 3/3 at a 10 s budget, seeds 41–43</span>
+    </li>
+    <li>
+      <span class="r-k">scene4, scene6</span>
+      <span class="r-v">solved 0/3 by both BiQRRT and QRRT</span>
+    </li>
+  </ul>
+  <p>Those are stopwatch observations on one host, not a benchmark, and there is a known confound:
+     <code>BiQRRTImpl::setup()</code> pins the extension step to 0.1 when no caller sets a range,
+     while QRRT's <code>SelfConfig</code> default measured 1.78–3.55 across scene1's levels, so
+     part of any gap may be step size rather than bidirectionality. Making that a declared
+     parameter with a scale-derived default, and then running a real campaign with confidence
+     intervals, is Track F and Phase 2 of the roadmap.</p>
+  <p>Both rows moved when the collision-resolution defect below was fixed: scene1 used to solve
+     3/3 and first solutions arrived six times sooner. Those were paths whose interiors had
+     barely been checked, so the older, faster numbers measured a different problem.</p>
+  <p class="claim">Until then this repository claims no planner is faster than another.</p>
+</section>
+
+<section>
+  <h2>A defect the playback found</h2>
+  <p>Animating a returned solution turned up something no number in the output reported: the
+     paths contained poses that collide. Every path <em>state</em> was valid — the viewer
+     re-checks them with a port of the C++ predicate and they all pass — but the arms swept
+     through an obstacle <em>between</em> two valid states: 22 of 73 interpolated poses on
+     scene1/BiQRRT, 0.049 units deep, 27 px on a 600 px canvas.</p>
+  <p>The cause was a units mismatch. OMPL sizes its motion-validator step as 1% of the state
+     space's bounds extent — 17.77 rad over eight joints — while this space's distance is a
+     workspace measure scaled by the 0.1 link length. One scene1 path segment measured 0.17
+     against a 0.178 step and received exactly one interior collision check while both arms
+     swung across the obstacle field.</p>
+  <p><code>KinematicChainSpace::validSegmentCount</code> now derives the count from the motion
+     itself: rotating joint <em>j</em> by Δθ moves everything beyond it by at most
+     (<em>n</em>−<em>j</em>)·linkLength·|Δθ|, which bounds the swept displacement of any point on
+     the arm, and the step is a fifth of the scene's shortest obstacle edge. The deepest
+     penetration left on a scene1 solution is 0.0004 units — 0.2 px — the epsilon any discrete
+     checker has: the recording the loop above plays grazes an obstacle on 1 of its 121 drawn
+     poses, against 22 of 73 before. Both viewers re-check every pose they draw and colour the
+     rejects red, so this cannot quietly come back.</p>
+</section>
+
+<section>
+  <h2>Run it yourself</h2>
+  <pre><code>docker run --rm ghcr.io/tomsabala/mlmp:latest --algo BiQRRT --input-file scene1.json --time-limit 10</code></pre>
+  <p><code>--algo BiQRRT --input-file ur5_scene1.json --time-limit 2</code> plans a 6-DOF UR5 in
+     joint space with FCL collision checking and prints <code>model: "urdf"</code>,
+     <code>dof: 6</code>.</p>
+</section>
+
+<footer>
+  <p><a href="explorer/">Trace Explorer</a> · <a href="live/">Interactive Planner</a> ·
+     <a href="https://github.com/tomsabala/MLMP">tomsabala/MLMP</a></p>
+</footer>
+</body>
+</html>

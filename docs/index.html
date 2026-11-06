@@ -3,24 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MLMP trace player — BiQRRT vs QRRT</title>
+<title>MLMP trace explorer — BiQRRT vs QRRT</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <h1>MLMP trace player</h1>
-  <p>Committed <code>mlmp.traceviz/1</code> fixtures packed from <code>mlmp.trace/1</code>
-     recordings — seed 42, 10 s budget, 50 ms per frame. Colour is tree membership, opacity is
-     bundle level, and each dot is one robot's chain tip at that vertex's bundle level
-     (a level-<em>L</em> vertex owns only its first <em>L</em>+1 links). The run's solution is
-     drawn in green as each robot's tip trajectory between its start and goal arms. Switch the
-     view to <em>vertices only</em> or <em>path only</em> when the edge web hides the result.</p>
+  <h1>MLMP trace explorer</h1>
+  <p>Two planners, one scene, one seed, replayed from committed <code>mlmp.traceviz/1</code>
+     recordings. <em>Solution motion</em> plays the arms along the solution, interpolated in joint
+     space the way the planner's own motion validator checked it. <em>Search tree</em> shows what
+     the planner explored to find it — read it one bundle level at a time; every dot is one
+     robot's chain tip at that vertex's level, and a level-<em>L</em> vertex owns only its first
+     <em>L</em>+1 links.</p>
+  <p>The lower canvas is the real configuration space of the scene's 2-D bundle level: each axis
+     is one joint angle over [−π, π], the grey region is where the arms collide, and the tree is
+     drawn in the space the planner actually searches. Higher levels are drawn faintly in the same
+     square because a bundle level <em>is</em> the projection of the one above it. How much of
+     that square is blocked depends on the scene: scene2's level 1 is a two-link arm with 38% of
+     its configuration space inside an obstacle, while scene3's level 0 is two short stubs that
+     can barely reach one.</p>
+  <p>Both panels of a scene get the same seed and the same budget, and the budget differs by
+     scene (10 s or 60 s) because recording costs planner time: every trace frame re-dumps the
+     whole graph, so a traced run explores less than an untraced one at the same wall clock. In
+     these recordings BiQRRT solves scene1 and scene2; QRRT solves nothing, and scenes 3 to 6 go
+     unsolved for both. Collision checking became roughly two orders of magnitude finer when a
+     resolution defect was fixed, which is why fewer cells solve here than this project's older
+     numbers claim — those paths were cheaper because their interiors were barely checked.</p>
 </header>
 
 <section class="controls">
   <label>Scene
     <select id="scene">
-      <option value="scene1">scene1</option>
+      <option value="scene1" selected>scene1</option>
       <option value="scene2">scene2</option>
       <option value="scene3">scene3</option>
       <option value="scene4">scene4</option>
@@ -28,19 +42,21 @@
       <option value="scene6">scene6</option>
     </select>
   </label>
+  <label>View
+    <select id="view">
+      <option value="motion" selected>solution motion</option>
+      <option value="graph">search tree + edges</option>
+      <option value="vertices">search vertices</option>
+    </select>
+  </label>
+  <label>Levels
+    <select id="levelSelect"></select>
+  </label>
   <button id="play">Play</button>
   <button id="prev">−1</button>
   <button id="next">+1</button>
   <input id="slider" type="range" min="0" max="0" value="0">
   <span id="counter" class="counter">0 / 0</span>
-  <label>View
-    <select id="view">
-      <option value="graph" selected>graph + edges</option>
-      <option value="vertices">vertices only</option>
-      <option value="path">path only</option>
-    </select>
-  </label>
-  <span id="levels" class="levels"></span>
   <span id="legend" class="legend"></span>
 </section>
 
@@ -48,19 +64,24 @@
   <figure>
     <canvas id="canvasA" width="520" height="520"></canvas>
     <figcaption id="captionA">loading…</figcaption>
+    <canvas id="cspaceA" class="cspace" width="520" height="520"></canvas>
+    <figcaption id="cspaceCaptionA" class="sub">configuration space</figcaption>
   </figure>
   <figure>
     <canvas id="canvasB" width="520" height="520"></canvas>
     <figcaption id="captionB">loading…</figcaption>
+    <canvas id="cspaceB" class="cspace" width="520" height="520"></canvas>
+    <figcaption id="cspaceCaptionB" class="sub">configuration space</figcaption>
   </figure>
 </section>
 
 <footer>
-  <p>Want to run the planner yourself? The <a href="live/">live wasm playground</a> solves
+  <p>Want to run the planner yourself? The <a href="../live/">live wasm playground</a> solves
      edited scenes in the browser, drawing through this page's renderer module.</p>
   <p>Fixtures regenerated with <code>mlmp/tools/recordTraces.sh</code>; the README loop comes
      from <code>mlmp/tools/traceGif.py</code>. Source:
      <a href="https://github.com/tomsabala/MLMP">tomsabala/MLMP</a>.</p>
+  <p><a href="../">Project overview</a></p>
 </footer>
 
 <script type="module" src="app.js"></script>

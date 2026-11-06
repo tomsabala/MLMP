@@ -1,0 +1,12 @@
+# REQUIRED, and not a copy of the repo-root .dockerignore. That file excludes
+# `web/dist/` (build output, gitignored) and `*.md`, and the three COPYs in this
+# directory's Dockerfile need web/dist. BuildKit reads `<dockerfile>.dockerignore`
+# when it exists and REPLACES the root one, so this file is how the app image
+# sees the Emscripten output at all. Without it the `COPY web/dist/` copies
+# nothing and the image serves 404s under /live/.
+#
+# Everything excluded here is either huge, machine-local, or not served.
+.git/
+mlmp/build/
+**/__pycache__/
+**/node_modules/

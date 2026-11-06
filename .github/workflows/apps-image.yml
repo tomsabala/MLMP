@@ -1,0 +1,99 @@
+# Publish the hosted site as a container image apps.tom-sabala.dev can run.
+#
+# The gateway over there never builds and never pulls on demand: `apps.json`
+# pins an immutable tag, `gateway/deploy.sh` pulls exactly what the manifest
+# names and refuses a moving tag, and the broker starts what is already on the
+# box. So this workflow's only job is to produce one tag per commit and push it,
+# and the tag convention is the one the other apps on that gateway already use:
+# `apps-mount-<full sha>`.
+#
+# WHY THIS PACKAGE AND NOT A NEW ONE. The tags live in the EXISTING, public
+# `ghcr.io/tomsabala/mlmp` package beside the native CLI image. A newly created
+# GHCR package is private by default and can only be made public through the web
+# UI, and `deploy.sh` pulls anonymously - exactly the undiscoverable manual step
+# that left this repository's GitHub Pages site unpublished for its whole life.
+# `:latest` on this package is the CLI image published by release.yml and is
+# never written here; `LABEL org.opencontainers.image.title` in
+# docker/app/Dockerfile is what tells the two artifacts apart in the package UI.
+#
+# The wasm build runs HERE rather than inside docker/app/Dockerfile because it
+# compiles OMPL under emsdk, which is minutes of work that must not be repeated
+# per app-image build - and because the same buildx cache scope as ci.yml's
+# `wasm` job makes a push to main reuse its layers.
+
+name: apps image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mlmp/**'
+      - 'web/**'
+      - 'docs/**'
+      - 'site/**'
+      - 'Dockerfile.wasm'
+      - 'docker/app/**'
+      - '.github/workflows/apps-image.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: apps-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.wasm
+          target: dist
+          outputs: type=local,dest=web/dist
+          cache-from: type=gha,scope=wasm
+          cache-to: type=gha,mode=max,scope=wasm
+
+      # Fail here rather than ship a hollow image: a site whose /live/ is empty
+      # or whose /explorer/ has no fixtures looks like a deploy problem on the
+      # gateway, which is the wrong place to debug it.
+      - name: Check the build has what the image needs
+        run: |
+          set -euo pipefail
+          test -s web/dist/src/mlmp.wasm
+          test -s web/dist/src/mlmp.mjs
+          test -f web/dist/index.html
+          test -f web/dist/scenes/index.json
+          test -f docs/index.html
+          test -f docs/traces/scene1-biqrrt.json
+          test -f site/index.html
+          du -sh site docs web/dist
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One immutable tag per commit and nothing else.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/mlmp:apps-mount-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false
+
+      # The line to paste into apps.json, printed where the deploy is decided.
+      - name: Manifest line
+        run: |
+          echo "::notice title=Pin this image in apps.json::\"image\": \"ghcr.io/${{ github.repository_owner }}/mlmp:apps-mount-${{ github.sha }}\""
